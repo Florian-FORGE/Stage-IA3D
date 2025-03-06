@@ -107,7 +107,7 @@ class Mutator():
         seq = replace_substring(seq, shuffled, inter.start, inter.end)
         self.cachedSequences[inter.chrom] = seq
         output_path = os.path.join("Outputs", f"{inter.name}.txt")
-        with open(output_path, "a") as f:
+        with open(output_path, "w") as f:            
             f.write(shuffled)
 
     def mask(self, inter):
@@ -251,14 +251,14 @@ class Mutation():
         if operation == "insertion":
             if not self._validinsertion(sequence):
                 raise ValueError("%s %d %d  %s is not a valid insertion sequence" %
-                                 (self.chrom, self.start, self.end, self.sequence))
+                                 (self.chrom, self.start, self.end, self.op, self.sequence))
 
     @property
     def len(self):
         return self.end - self.start
 
     def _validinsertion(self, input_sequence):
-        if (bool(re.match(r'^[ACGTN]+$', input_sequence)) and
+        if (bool(re.match(r'^[ACGTNacgtn]+$', input_sequence)) and
             len(input_sequence) == self.len):
             return True
         else:
