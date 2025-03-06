@@ -67,10 +67,10 @@ def read_mutations_from_tsv(mutationfile):
             intervals.append(mutation)
     return intervals
 
-def main(mutationfile, genome, outfasta):
+def main(mutationfile, genome, outfasta, mutationtype=None):
     
     if args.bed:
-        mutations = read_mutations_from_BED(mutationfile)
+        mutations = read_mutations_from_BED(mutationfile,mutationtype)
     else:
         mutations = read_mutations_from_tsv(mutationfile)
 
@@ -111,4 +111,4 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
         
-    main(args.mutationfile, args.genome, args.output)
+    main(args.mutationfile, args.genome, args.output,args.mutationtype)
