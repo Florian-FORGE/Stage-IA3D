@@ -41,7 +41,7 @@ If the mutation is of type insertion, the sequence must be a valid nucleotide st
 #             intervals.append(mutation)
 #     return intervals
 
-def read_mutations_from_BED(mutationfile,muttype="shuffle",sequence="."):
+def read_mutations_from_BED(mutationfile,muttype="shuffle",sequence=None):
     """ Read a bed file and strores the associated BedInterval in a list"""
     intervals = []
     with open(mutationfile, "r") as fin:
@@ -67,8 +67,12 @@ def read_mutations_from_tsv(mutationfile):
             intervals.append(mutation)
     return intervals
 
-def main(mutationfile, genome, outfasta):
-    mutations = read_mutations_from_tsv(mutationfile)
+def main(mutationfile, genome, outfasta, muttype="shuffle",sequence=None):
+    
+    if mutationfile.endswith('.bed'):
+        mutations = read_mutations_from_BED(mutationfile,muttype,str(sequence))
+    else:
+        mutations = read_mutations_from_tsv(mutationfile)
 
     mutator = Mutator(FastaFile(genome), mutations)
 
@@ -88,12 +92,23 @@ def parse_arguments():
                         required=True, help='the genome fasta file')
     parser.add_argument('--output',
                         required=True, help='the output fasta file')
-
+    parser.add_argument("--muttype",
+                        help="Specify the mutation type if mutations is a BED file")
+    parser.add_argument("--sequence",
+                        help="Specify the sequence to be inserted if mutations is a BED file and muttype is insertion")
+    
     args = parser.parse_args()
+    
+    if args.mutations.endswith('.bed') and args.muttype not in ['shuffle','inversion','mask','insertion']:
+        parser.error("--muttype is required when mutations is a BED file")
+    
+    if args.mutations.endswith('.bed') and args.muttype == 'insertion' and args.sequence is None:
+        parser.error("--sequence is required when mutations is a BED file and muttype is insertion")
+    
     return args
 
 
 if __name__ == '__main__':
     args = parse_arguments()
 
-    main(args.mutations, args.genome, args.output)
+    main(args.mutations, args.genome, args.output,args.muttype,args.sequence)

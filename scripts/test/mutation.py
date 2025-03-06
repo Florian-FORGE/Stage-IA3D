@@ -71,6 +71,8 @@ class Mutator():
         the chromosomes sequences stored in a dictionnary
     chromosome_mutations: dict
         a dictionnary storing the number of mutations for each chromosome
+    trace: dict
+        a dictionnary storing the trace of the mutations #Not used for now
     """
     def __init__(self, fasta_handle, intervals, maximumCached=1):
         self.handle = fasta_handle
@@ -79,6 +81,7 @@ class Mutator():
         self.intervals = intervals
         self.cachedSequences = {}
         self.chromosome_mutations = defaultdict(int)
+        self.trace={}
 
     def flush(self):
         self.cachedSequences = {}
@@ -250,8 +253,8 @@ class Mutation():
         self.op = operation
         if operation == "insertion":
             if not self._validinsertion(sequence):
-                raise ValueError("%s %d %d  %s is not a valid insertion sequence" %
-                                 (self.chrom, self.start, self.end, self.op, self.sequence))
+                raise ValueError("%s %d %d %s %s is not a valid insertion sequence" %
+                                 (self.chrom, int(self.start), int(self.end), self.op, self.sequence))
 
     @property
     def len(self):
