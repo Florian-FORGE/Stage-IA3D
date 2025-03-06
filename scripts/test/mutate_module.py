@@ -68,7 +68,11 @@ def read_mutations_from_tsv(mutationfile):
     return intervals
 
 def main(mutationfile, genome, outfasta):
-    mutations = read_mutations_from_tsv(mutationfile)
+    
+    if args.bed:
+        mutations = read_mutations_from_BED(mutationfile)
+    else:
+        mutations = read_mutations_from_tsv(mutationfile)
 
     mutator = Mutator(FastaFile(genome), mutations)
 
@@ -82,18 +86,29 @@ def parse_arguments():
                                      description=textwrap.dedent('''\
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
-    parser.add_argument('--mutations',
+    parser.add_argument('--mutationfile',
                         required=True, help='the mutation file, see documentation for the format')
     parser.add_argument('--genome',
                         required=True, help='the genome fasta file')
     parser.add_argument('--output',
                         required=True, help='the output fasta file')
-
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--bed",
+                       action="store_true", help="the format of the mutation file is bed")
+    group.add_argument("--nonbed",
+                       action="store_true", help="the format of the mutation file is non-bed")
+    parser.add_argument("--mutationtype",
+                        required=False, help="Specify the type of mutation to perform (only allowed if --bed is set)")
+    
     args = parser.parse_args()
+
+    if args.mutationtype and not args.bed:
+        parser.error("--mutationtype can only be used with --bed")
+    
     return args
 
 
 if __name__ == '__main__':
     args = parse_arguments()
-
-    main(args.mutations, args.genome, args.output)
+        
+    main(args.mutationfile, args.genome, args.output)
