@@ -67,10 +67,10 @@ def read_mutations_from_tsv(mutationfile):
             intervals.append(mutation)
     return intervals
 
-def main(mutationfile, genome, outfasta, mutationtype=None):
+def main(mutationfile, bed, genome, outfasta, mutationtype):
     
-    if args.bed:
-        mutations = read_mutations_from_BED(mutationfile,mutationtype)
+    if bed :
+        mutations = read_mutations_from_BED(bed, mutationtype)
     else:
         mutations = read_mutations_from_tsv(mutationfile)
 
@@ -86,19 +86,17 @@ def parse_arguments():
                                      description=textwrap.dedent('''\
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
-    parser.add_argument('--mutationfile',
-                        required=True, help='the mutation file, see documentation for the format')
     parser.add_argument('--genome',
                         required=True, help='the genome fasta file')
     parser.add_argument('--output',
                         required=True, help='the output fasta file')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--bed",
-                       action="store_true", help="the format of the mutation file is bed")
-    group.add_argument("--nonbed",
-                       action="store_true", help="the format of the mutation file is non-bed")
+                       help="the format of the mutation file is bed")
+    group.add_argument('--mutationfile',
+                        help='the mutation file, see documentation for the format')
     parser.add_argument("--mutationtype",
-                        required=False, help="Specify the type of mutation to perform (only allowed if --bed is set)")
+                        required=False, help="Specify the type of mutation to perform (only allowed if --bed is set)", default="shuffle")
     
     args = parser.parse_args()
 
@@ -110,5 +108,5 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
-        
-    main(args.mutationfile, args.genome, args.output,args.mutationtype)
+    print(args)  
+    main(args.mutationfile, args.bed, args.genome, args.output,args.mutationtype)
