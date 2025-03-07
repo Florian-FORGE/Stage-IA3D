@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import os
 import sys
 import random
 import re
@@ -71,6 +70,8 @@ class Mutator():
         the chromosomes sequences stored in a dictionnary
     chromosome_mutations: dict
         a dictionnary storing the number of mutations for each chromosome
+        trace: dict
+        a dictionnary storing the data in a VCF-like format for each mutations
     """
     def __init__(self, fasta_handle, intervals, maximumCached=1):
         self.handle = fasta_handle
@@ -79,6 +80,7 @@ class Mutator():
         self.intervals = intervals
         self.cachedSequences = {}
         self.chromosome_mutations = defaultdict(int)
+        self.trace = defaultdict(list) #or is it better to use a standard dict?
 
     def flush(self):
         self.cachedSequences = {}
@@ -96,6 +98,14 @@ class Mutator():
 
     def modify(self, chrom, sequence):
         self.cachedSequences[chrom] = sequence
+    
+    def record_trace(self,interval):
+        self.trace[interval.chrom]={}
+        self.trace[interval.chrom][interval.name]={}
+        self.trace[interval.chrom][interval.name]["start"]=interval.start
+        self.trace[interval.chrom][interval.name]["end"]=interval.end
+        self.trace[interval.chrom][interval.name]["strand"]=interval.strand
+        #self.trace[interval.chrom][interval.name]["operation"]=interval.operation
 
     def shuffle(self, inter):
         """"
@@ -103,21 +113,22 @@ class Mutator():
         """
         seq = self.fetch(inter.chrom)
         subseq = seq[inter.start:inter.end]
+        self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
         shuffled = ''.join(random.sample(subseq, len(subseq)))
         seq = replace_substring(seq, shuffled, inter.start, inter.end)
         self.cachedSequences[inter.chrom] = seq
-        output_path = os.path.join("Outputs", f"{inter.name}.txt")
-        with open(output_path, "w") as f:            
-            f.write(shuffled)
+        self.trace[inter.chrom][inter.name]["variant_seq"]=shuffled
 
     def mask(self, inter):
         """"
         Interval will be masked
         """
         seq = self.fetch(inter.chrom)
+        self.trace[inter.chrom][inter.name]["ref_seq"]=seq[inter.start:inter.end]
         masked = 'N' * inter.len
         seq = replace_substring(seq, masked, inter.start, inter.end)
         self.cachedSequences[inter.chrom] = seq
+        self.trace[inter.chrom][inter.name]["variant_seq"]=masked
 
     def invert(self, inter):
         """"
@@ -125,22 +136,27 @@ class Mutator():
         """
         seq = self.fetch(inter.chrom)
         subseq = seq[inter.start:inter.end]
+        self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
         inverted = str(Seq(subseq).reverse_complement())
         seq = replace_substring(seq, inverted, inter.start, inter.end)
         self.cachedSequences[inter.chrom] = seq
+        self.trace[inter.chrom][inter.name]["variant_seq"]=inverted
+
 
     def insert(self, inter):
         seq = self.fetch(inter.chrom)
         subseq = seq[inter.start:inter.end]
+        self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
         if inter.strand == "+":
             sequence = inter.sequence
         else:
-            sequence = str(Seq(subseq).reverse_complement())
+            sequence = str(Seq(inter.sequence).reverse_complement())
         if len(subseq) != len(sequence):
             raise ValueError("%s %d %d  %s is not a valid insertion sequence" %
                              (inter.chrom, inter.start, inter.end, self.sequence))
         seq = replace_substring(seq, sequence, inter.start, inter.end)
         self.cachedSequences[inter.chrom] = seq
+        self.trace[inter.chrom][inter.name]["variant_seq"]=sequence
 
     def mutate(self):
         """
@@ -148,6 +164,7 @@ class Mutator():
         """
         for interval in self.intervals:
             self.chromosome_mutations[interval.chrom] += 1
+            self.record_trace(interval)
             if interval.op == "shuffle":
                 self.shuffle(interval)
             elif interval.op == "mask":
@@ -224,7 +241,7 @@ class Mutator():
         return seq_records
 
 
-def replace_substring(seq, newstring, start, end):
+def replace_substring(seq, newstring: str, start: int, end: int):
     """Replaces in a string, a substring, specified by positions, with a given string
        Both string should have the same size
        In bed start is 0-based and end 1-based
@@ -240,7 +257,7 @@ class Mutation():
     """
     Tiny class for storing a bed interval with an associated mutation
     """
-    def __init__(self, chrom, start, end, name, strand, operation, sequence):
+    def __init__(self, chrom: int, start: int, end: int, name: str, strand: str, operation: str, sequence: str):
         self.chrom = chrom
         self.start = int(start)
         self.end = int(end)
@@ -250,7 +267,7 @@ class Mutation():
         self.op = operation
         if operation == "insertion":
             if not self._validinsertion(sequence):
-                raise ValueError("%s %d %d  %s is not a valid insertion sequence" %
+                raise ValueError("%s %d %d  %s %s is not a valid insertion sequence" %
                                  (self.chrom, self.start, self.end, self.op, self.sequence))
 
     @property

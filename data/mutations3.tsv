@@ -1,1 +1,2 @@
+chrom	start	end	name	strand	operation	sequence
 1	300	500	inver1	+	inversion	.

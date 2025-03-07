@@ -4,6 +4,7 @@
 import argparse
 import os
 import textwrap
+import pandas as pd
 
 from pysam import FastaFile
 from Bio import SeqIO
@@ -28,21 +29,8 @@ If the mutation is of type insertion, the sequence must be a valid nucleotide st
 
 """
 
-# def read_mutations(mutationfile):
-#     """ Read a bed file and strores the associated BedInterval in a list"""
-#     intervals = []
-#     with open(mutationfile, "r") as fin:
-#         for line in fin:
-#             if line.startswith("#"):
-#                 continue
-#             fields = line.strip().split()
-#             mutation = Mutation(fields[0], fields[1], fields[2],
-#                                 fields[3], fields[4], fields[5], fields[6])
-#             intervals.append(mutation)
-#     return intervals
-
-def read_mutations_from_BED(mutationfile,muttype="shuffle",sequence="."):
-    """ Read a bed file and strores the associated BedInterval in a list"""
+def read_mutations_from_BED(mutationfile,muttype: str ="shuffle",sequence: str ="."):
+    """ Read a .bed file and strores the associated BedInterval in a list"""
     intervals = []
     with open(mutationfile, "r") as fin:
         for line in fin:
@@ -55,19 +43,17 @@ def read_mutations_from_BED(mutationfile,muttype="shuffle",sequence="."):
     return intervals
 
 def read_mutations_from_tsv(mutationfile):
-    """ Read a BED-like file filled with the data in the same order as needed forcreating a Mutation-class object and strores the associated BedInterval in a list"""
+    """ Read a database describing mutations and stores the needed informations in a list"""
+    df = pd.read_csv(mutationfile, sep="\t", header=0)
     intervals = []
-    with open(mutationfile, "r") as fin:
-        for line in fin:
-            if line.startswith("#"):
-                continue
-            fields = line.strip().split()
-            mutation = Mutation(fields[0], fields[1], fields[2],
-                                fields[3], fields[4], fields[5], fields[6])
-            intervals.append(mutation)
+    for index, row in df.iterrows():
+        mutation = Mutation(str(row['chrom']), int(row['start']), int(row['end']), str(row['name']),
+                            str(row['strand']), str(row['operation']), str(row['sequence']))
+        intervals.append(mutation)
     return intervals
 
-def main(mutationfile, bed, genome, outfasta, mutationtype):
+
+def main(mutationfile, bed, genome, outfasta: str, mutationtype: str):
     
     if bed :
         mutations = read_mutations_from_BED(bed, mutationtype)
@@ -80,6 +66,7 @@ def main(mutationfile, bed, genome, outfasta, mutationtype):
     seq_records = mutator.get_SeqRecords()
     output_path = os.path.join("Outputs", outfasta)
     SeqIO.write(seq_records, output_path, "fasta")
+    print(mutator.trace) #should be written in the Outputs file as well but in which format ? And what syntax should be used in the os.path.join() function ? 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -96,7 +83,7 @@ def parse_arguments():
     group.add_argument('--mutationfile',
                         help='the mutation file, see documentation for the format')
     parser.add_argument("--mutationtype",
-                        required=False, help="Specify the type of mutation to perform (only allowed if --bed is set)", default="shuffle")
+                        required=False, help="Specify the type of mutation to perform (only allowed if --bed is set), default='shuffle'")
     
     args = parser.parse_args()
 
@@ -108,5 +95,4 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
-    print(args)  
-    main(args.mutationfile, args.bed, args.genome, args.output,args.mutationtype)
+    main(args.mutationfile, args.bed, args.genome, args.output, args.mutationtype)
