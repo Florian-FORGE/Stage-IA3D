@@ -1,1 +1,5 @@
-1	300	500	.	shuffle1	+	shuffle
+chrom	start	end	name	strand	operation	sequence
+1	300	500	shuffle1	+	shuffle	.
+1	600	800	mask1	+	mask	.
+1	900	1100	inver1	+	inversion	.
+1	1200	1220	inser1	+	insertion	AAAAAAAAAAAAAAAAAAAA

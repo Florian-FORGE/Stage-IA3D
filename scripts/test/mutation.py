@@ -100,7 +100,6 @@ class Mutator():
         self.cachedSequences[chrom] = sequence
     
     def record_trace(self,interval):
-        self.trace[interval.chrom]={}
         self.trace[interval.chrom][interval.name]={}
         self.trace[interval.chrom][interval.name]["start"]=interval.start
         self.trace[interval.chrom][interval.name]["end"]=interval.end
@@ -162,6 +161,9 @@ class Mutator():
         """
         Mutate the sequence for each interval according to the mutation type
         """
+        for interval in self.intervals:
+            self.trace[interval.chrom]={}
+
         for interval in self.intervals:
             self.chromosome_mutations[interval.chrom] += 1
             self.record_trace(interval)
