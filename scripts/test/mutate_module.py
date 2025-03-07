@@ -16,7 +16,7 @@ In silico mutation of a sequence specified by a vcf-like file
 
 The mutation file is a tab delimited file with 7 fields and the following format
 
-chr start end sequence id type
+chr start end id strand type sequence
 
 where :
   chr, start and end as usual
