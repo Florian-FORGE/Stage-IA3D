@@ -44,7 +44,7 @@ def read_mutations_from_BED(mutationfile,muttype: str ="shuffle",sequence: str =
 
 def read_mutations_from_tsv(mutationfile):
     """ Read a database describing mutations and stores the needed informations in a list"""
-    df = pd.read_csv(mutationfile, sep="\t", header=0)
+    df = pd.read_csv(mutationfile, sep="\t", header=0, dtype={'chrom': str, 'start': int, 'end': int, 'name': str, 'strand': str, 'operation': str, 'sequence': str})
     intervals = []
     for index, row in df.iterrows():
         mutation = Mutation(str(row['chrom']), int(row['start']), int(row['end']), str(row['name']),
@@ -55,7 +55,7 @@ def read_mutations_from_tsv(mutationfile):
 
 def main(mutationfile, bed, genome, outfasta: str, mutationtype: str):
     
-    if bed :
+    if bed:
         mutations = read_mutations_from_BED(bed, mutationtype)
     else:
         mutations = read_mutations_from_tsv(mutationfile)
@@ -66,7 +66,10 @@ def main(mutationfile, bed, genome, outfasta: str, mutationtype: str):
     seq_records = mutator.get_SeqRecords()
     output_path = os.path.join("Outputs", outfasta)
     SeqIO.write(seq_records, output_path, "fasta")
-    print(mutator.trace) #should be written in the Outputs file as well but in which format ? And what syntax should be used in the os.path.join() function ? 
+    
+    data, keys = mutator.get_trace()
+    df = pd.DataFrame(data,columns=keys)
+    df.to_csv("Outputs/trace.csv", sep="\t", index=False, header=True)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,

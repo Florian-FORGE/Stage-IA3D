@@ -104,7 +104,7 @@ class Mutator():
         self.trace[interval.chrom][interval.name]["start"]=interval.start
         self.trace[interval.chrom][interval.name]["end"]=interval.end
         self.trace[interval.chrom][interval.name]["strand"]=interval.strand
-        #self.trace[interval.chrom][interval.name]["operation"]=interval.operation
+        self.trace[interval.chrom][interval.name]["operation"]=interval.op
 
     def shuffle(self, inter):
         """"
@@ -241,6 +241,14 @@ class Mutator():
                                    description="mutated chromosome %d mutations" % num)
             seq_records.append(seq_record)
         return seq_records
+    
+    def get_trace(self):
+        keys = ["chrom", "name", "start", "end", "strand", "operation", "ref_seq", "variant_seq"]
+        data=[]
+        for key in self.trace:
+            for k in self.trace[key]:
+                data.append([key, k, self.trace[key][k]["start"], self.trace[key][k]["end"], self.trace[key][k]["strand"], self.trace[key][k]["operation"], self.trace[key][k]["ref_seq"], self.trace[key][k]["variant_seq"]])
+        return data, keys
 
 
 def replace_substring(seq, newstring: str, start: int, end: int):
