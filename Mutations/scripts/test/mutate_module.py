@@ -64,12 +64,12 @@ def main(mutationfile, bed, genome, outfasta: str, mutationtype: str):
 
     mutator.mutate()
     seq_records = mutator.get_SeqRecords()
-    output_path = os.path.join("Outputs", outfasta)
+    output_path = os.path.join("Mutations/Outputs", outfasta)
     SeqIO.write(seq_records, output_path, "fasta")
     
     data, keys = mutator.get_trace()
     df = pd.DataFrame(data,columns=keys)
-    df.to_csv("Outputs/trace.csv", sep="\t", index=False, header=True)
+    df.to_csv("Mutations/Outputs/trace.csv", sep="\t", index=False, header=True)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,

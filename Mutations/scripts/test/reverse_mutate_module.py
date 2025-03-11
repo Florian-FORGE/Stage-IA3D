@@ -33,7 +33,7 @@ def main(mutationfile, m_genome, outfasta: str):
 
     mutator.mutate()
     seq_records = mutator.get_SeqRecords()
-    output_path = os.path.join("Outputs", outfasta)
+    output_path = os.path.join("Mutations/Outputs", outfasta)
     SeqIO.write(seq_records, output_path, "fasta")
     
 

@@ -35,38 +35,25 @@ def read_orca_matrix(orcafile):
     """
     metadata=extract_metadata_to_dict(orcafile)
     type = metadata['Orca']
-    metaregion = metadata['region'].split(':')
-    res_num = metadata['resol'].split('M')
-    decal=int(res_num[0])*500000
-    centreregion = metadata['mpos']
-    region = [metaregion[0], centreregion-decal, centreregion+decal]
-    resolution = int(metadata['resol'])
+    # chrom = metadata['region'].split(':')[0]
+    chrom = "1" #just for testing
+    start = metadata['start']
+    end = metadata['end']
+    region = [chrom, start, end]
+    resolution = metadata['resol']
     matrix = np.loadtxt(orcafile, skiprows=1)
     return OrcaMatrix(type, region, resolution, matrix)
-
-def test():
-    orcafile = 'wildtype/orca_predictions_4Mb.txt'
-    orca_matrix = read_orca_matrix(orcafile)
-    print(orca_matrix.references())
-    print(orca_matrix.get_matrix())
-    print(orca_matrix.get_insulation)
-    print(orca_matrix.get_corresponding_bin(16000000))
-    print(orca_matrix.get_corresponding_bin_range([16000000, 17000000]))
-    print(orca_matrix.get_corresponding_position(10))
-    orca_matrix.heatmap()
-
-test()
-
 
 
 def main(orcafile, output_scores, output_heatmap):
     orca_matrix = read_orca_matrix(orcafile)
-    output_scores_path = os.path.join("Outputs", output_scores)
+    output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
     with open(output_scores_path, 'w') as f:
         f.write("Insulation scroes" + '\t' + str(orca_matrix.get_insulation_scores()) + '\n')
         f.write("PC1" + '\t' + str(orca_matrix.get_PC1()) + '\n')
-    output_heatmap_path = os.path.join("Outputs", output_heatmap)
-    orca_matrix.heatmap(output_file=output_heatmap_path)
+        f.close()
+    #output_heatmap_path = os.path.join("Outputs", output_heatmap)
+    orca_matrix.heatmap()
 
 
 
@@ -90,4 +77,4 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    main(args.mutations, args.output_scores, args.output_heatmap)
+    main(args.orcafile, args.output_scores, args.output_heatmap)

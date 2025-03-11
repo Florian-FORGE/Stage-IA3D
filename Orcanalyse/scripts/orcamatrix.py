@@ -92,12 +92,13 @@ class OrcaMatrix ():
         """
         start, end = self.region[1], self.region[2]
         bin_range = (end - start)//len(self.matrix)
-        return [start + bin * bin_range, start + (bin + 1) * bin_range]
+        return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
 
     def heatmap(self, output_file: str = None):
         plt.imshow(self.matrix, cmap='hot', interpolation='nearest')
         if output_file:
-            plt.savefig(output_file)
+            with open(output_file, 'x') as pdf:
+                pdf.savefig()
         else:
             plt.show()
     
