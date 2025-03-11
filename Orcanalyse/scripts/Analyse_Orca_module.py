@@ -45,15 +45,17 @@ def read_orca_matrix(orcafile):
     return OrcaMatrix(type, region, resolution, matrix)
 
 
-def main(orcafile, output_scores, output_heatmap):
+def main(orcafile, output_scores, output_heatmap, output_graphs):
     orca_matrix = read_orca_matrix(orcafile)
     output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
     with open(output_scores_path, 'w') as f:
         f.write("Insulation scroes" + '\t' + str(orca_matrix.get_insulation_scores()) + '\n')
         f.write("PC1" + '\t' + str(orca_matrix.get_PC1()) + '\n')
         f.close()
-    #output_heatmap_path = os.path.join("Outputs", output_heatmap)
-    orca_matrix.heatmap()
+    output_heatmap_path = os.path.join("Orcanalyse/Outputs", output_heatmap)
+    orca_matrix.heatmap(output_heatmap_path)
+    output_graphs_path = os.path.join("Orcanalyse/Outputs", output_graphs)
+    orca_matrix.save_graphs(output_graphs_path)    
 
 
 
@@ -70,6 +72,8 @@ def parse_arguments():
                         required=True, help='the outputs insulation scores and PC1')
     parser.add_argument('--output_heatmap',
                         required=True, help='the output heatmap')
+    parser.add_argument('--output_graphs',
+                        required=True, help='the output graphs')
 
     args = parser.parse_args()
     return args
@@ -77,4 +81,4 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    main(args.orcafile, args.output_scores, args.output_heatmap)
+    main(args.orcafile, args.output_scores, args.output_heatmap, args.output_graphs)

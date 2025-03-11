@@ -1,6 +1,8 @@
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
+
 
 """
 Analyse of orca matrices including insulation scores, PC1 values and the corresponding heatmaps
@@ -95,11 +97,29 @@ class OrcaMatrix ():
         return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
 
     def heatmap(self, output_file: str = None):
-        plt.imshow(self.matrix, cmap='hot', interpolation='nearest')
         if output_file:
-            with open(output_file, 'x') as pdf:
-                pdf.savefig()
+            plt.imshow(self.matrix, cmap='hot', interpolation='none')
+            plt.savefig(output_file, transparent=True)
         else:
+            plt.imshow(self.matrix, cmap='hot', interpolation='nearest')
             plt.show()
+    
+    def save_graphs(self, output_file: str = None):
+        """
+        Function to save in a pdf file the heatmap and the insulation scores as well as PC1 values, represented in two separated graphs, corresponding to the relevent OrcaMatrix 
+            
+        """
+    
+        with PdfPages(output_file, keep_empty=False) as pdf:
+            plt.imshow(self.matrix, cmap='hot', interpolation='nearest')
+            pdf.savefig(transparent=True)
+            plt.plot(self.get_insulation_scores(), color='blue', label='Insulation scores')
+            pdf.savefig(transparent=True)
+            plt.plot(self.get_PC1(), color='red', label='PC1 values')
+            pdf.savefig(transparent=True)
+        pdf.close()
+       
+    
+
     
     
