@@ -6,10 +6,10 @@ import numpy as np
 import os
 
 """
-Analyse of orca matrices including insulation scores, PC1 values and the corresponding heatmaps
+Analyse of a pair of orca matrices (observed and expected) including insulation scores, PC1 values and the corresponding heatmaps
 
 The first line in the Orca file should contain metadata in the following format:
-# Orca=normmats region=chr1:1000000-2000000 mpos=1500000 resol=50000
+# Orca=normmats resol=2Mb mpos=9621000 wpos=16000000 start=8608000 end=10608000 nbins=250 width=2000000 chromlen=158534110 mutation=None
 
 The rest of the file should contain the matrix itself
 
@@ -44,18 +44,22 @@ def read_orca_matrix(orcafile):
     matrix = np.loadtxt(orcafile, skiprows=1)
     return type, region, resolution, matrix
 
-
-def main(orcafile, coolfile, output_scores, output_heatmap, output_graphs):
+def create_OrcaMatrix(orcafile, coolfile):
     orca_mat = read_orca_matrix(orcafile)
     cool_matrix = read_orca_matrix(coolfile) #for now just to test the function because I don't have the cool file
-    orca_matrix = OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix[3], orca_mat[3])
+    return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix[3], orca_mat[3])
+
+
+def main(orcafile, coolfile, output_scores, output_heatmap, output_graphs):
+    orca_matrix = create_OrcaMatrix(orcafile,coolfile)
     output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
     with open(output_scores_path, 'w') as f:
-        f.write("Insulation scroes" + '\t' + str(orca_matrix.get_insulation_scores()) + '\n')
-        f.write("PC1" + '\t' + str(orca_matrix.get_PC1()) + '\n')
-        f.close()
+        f.write("Insulation scores_observed" + '\t' + str(orca_matrix.get_insulation_scores()[0]) + '\n')
+        f.write("PC1_observeded" + '\t' + str(orca_matrix.get_PC1()[0]) + '\n')
+        f.write("Insulation scores_expected" + '\t' + str(orca_matrix.get_insulation_scores()[1]) + '\n')
+        f.write("PC1_expected" + '\t' + str(orca_matrix.get_PC1()[1]) + '\n')
     output_heatmap_path = os.path.join("Orcanalyse/Outputs", output_heatmap)
-    orca_matrix.heatmap(output_heatmap_path)
+    orca_matrix.heatmaps(output_heatmap_path)
     output_graphs_path = os.path.join("Orcanalyse/Outputs", output_graphs)
     orca_matrix.save_graphs(output_graphs_path)    
 
