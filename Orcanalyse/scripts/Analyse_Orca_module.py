@@ -37,16 +37,18 @@ def read_orca_matrix(orcafile):
     type = metadata['Orca']
     # chrom = metadata['region'].split(':')[0]
     chrom = "1" #just for testing
-    start = metadata['start']
-    end = metadata['end']
+    start = int(metadata['start'])
+    end = int(metadata['end'])
     region = [chrom, start, end]
     resolution = metadata['resol']
     matrix = np.loadtxt(orcafile, skiprows=1)
-    return OrcaMatrix(type, region, resolution, matrix)
+    return type, region, resolution, matrix
 
 
-def main(orcafile, output_scores, output_heatmap, output_graphs):
-    orca_matrix = read_orca_matrix(orcafile)
+def main(orcafile, coolfile, output_scores, output_heatmap, output_graphs):
+    orca_mat = read_orca_matrix(orcafile)
+    cool_matrix = read_orca_matrix(coolfile) #for now just to test the function because I don't have the cool file
+    orca_matrix = OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix[3], orca_mat[3])
     output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
     with open(output_scores_path, 'w') as f:
         f.write("Insulation scroes" + '\t' + str(orca_matrix.get_insulation_scores()) + '\n')
@@ -67,7 +69,9 @@ def parse_arguments():
                                      Calculates the insultion and PC1 scores from an Orca file and outputs them and the corresponding heatmap
                                      '''))
     parser.add_argument('--orcafile',
-                        required=True, help='the orca file, with the first line containing metadata')
+                        required=True, help='the orca file containing the expected matrix, with the first line containing metadata')
+    parser.add_argument('--coolfile',
+                        required=True, help='the cool file containing the observed matrix')
     parser.add_argument('--output_scores',
                         required=True, help='the outputs insulation scores and PC1')
     parser.add_argument('--output_heatmap',
@@ -81,4 +85,4 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    main(args.orcafile, args.output_scores, args.output_heatmap, args.output_graphs)
+    main(args.orcafile, args.coolfile, args.output_scores, args.output_heatmap, args.output_graphs)
