@@ -1,9 +1,13 @@
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
+
+
 from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import EngFormatter
+
+from Cmap_orca import hnh_cmap_ext5
 
 
 """
@@ -105,8 +109,7 @@ class OrcaMatrix ():
         start, end = self.region[1], self.region[2]
         bin_range = (end - start)//len(self.observed_matrix)
         return [(positions[0] - start)//bin_range, (positions[1] - start)//bin_range]
-    
-    
+  
     def get_corresponding_position(self, bin: int):
         """
         Method to get the position corresponding to a given bin (0-based)
@@ -115,23 +118,25 @@ class OrcaMatrix ():
         bin_range = (end - start)//len(self.observed_matrix)
         return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
 
+
     def heatmaps(self, output_file: str = None):
         bp_formatter = EngFormatter('b', places=1)
         position_values = [self.get_corresponding_position(0)[0]] + [self.get_corresponding_position(i)[0] for i in range(49,250,50)]
         formatted_position_values = [bp_formatter.format_eng(value) for value in position_values]
         titles = [self.references[0],self.references[1],self.references[2],self.references[3]]
+        cmap=hnh_cmap_ext5
         
         gs = GridSpec(nrows=2, ncols=1)
         f = plt.figure(clear=True, figsize=(10, 20))
         ax_heatmap_obs = f.add_subplot(gs[0, 0])
-        ax_heatmap_obs.imshow(self.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+        ax_heatmap_obs.imshow(self.observed_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
         ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
         ax_heatmap_obs.set_yticks([0, 50, 100, 150, 200, 250])
         ax_heatmap_obs.set_yticklabels(formatted_position_values)
         ax_heatmap_obs.set_xticks([0, 50, 100, 150, 200, 250])
         ax_heatmap_obs.set_xticklabels(formatted_position_values)
         ax_heatmap_exp = f.add_subplot(gs[1, 0])
-        ax_heatmap_exp.imshow(self.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+        ax_heatmap_exp.imshow(self.predicted_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
         ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
         ax_heatmap_exp.set_yticks([0, 50, 100, 150, 200, 250])
         ax_heatmap_exp.set_yticklabels(formatted_position_values)
@@ -144,7 +149,6 @@ class OrcaMatrix ():
             plt.show()
     
 
-
     def save_graphs(self, output_file: str = None):
         """
         Function to save in a pdf file the heatmap and the insulation scores as well as PC1 values, represented in two separated graphs, corresponding to the relevent OrcaMatrix 
@@ -154,6 +158,7 @@ class OrcaMatrix ():
         position_values = [self.get_corresponding_position(0)[0]] + [self.get_corresponding_position(i)[0] for i in range(49,250,50)]
         formatted_position_values = [bp_formatter.format_eng(value) for value in position_values]
         titles = [self.references[0],self.references[1],self.references[2],self.references[3]]
+        cmap=hnh_cmap_ext5
 
 
         with PdfPages(output_file, keep_empty=False) as pdf:
@@ -165,7 +170,7 @@ class OrcaMatrix ():
             
             # Heatmap_obs
             ax_heatmap_obs = f.add_subplot(gs[0, 0])
-            ax_heatmap_obs.imshow(self.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_obs.imshow(self.observed_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
             format_ticks(ax_heatmap_obs, x=False, y=False)
             ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_obs.set_yticks([0,50,100,150,200,250])
@@ -191,7 +196,7 @@ class OrcaMatrix ():
 
             # Heatmap_exp
             ax_heatmap_exp = f.add_subplot(gs[3, 0])
-            ax_heatmap_exp.imshow(self.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_exp.imshow(self.predicted_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
             format_ticks(ax_heatmap_exp, x=False, y=False)
             ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_exp.set_yticks([0,50,100,150,200,250])
@@ -237,6 +242,7 @@ def format_ticks(ax, x=True, y=True, rotate=True):
         ax.tick_params(axis='x',rotation=45)
 
 
+
 class OrcaMatrices():
     """
     Class associated to a set of Orca matrices
@@ -278,25 +284,27 @@ class OrcaMatrices():
         for key, values in self.matrices.items():
             self.predicted_matrices[key]=values.predicted_matrix
     
+
     def multi_heatmaps(self,output_file: str = None):
         bp_formatter = EngFormatter('b', places=1)
         gs = GridSpec(nrows=2, ncols=6)
         f = plt.figure(clear=True, figsize=(60, 20))
         i=0
+        cmap=hnh_cmap_ext5
 
         for key, values in self.matrices.items():
             position_values = [values.get_corresponding_position(0)[0]] + [values.get_corresponding_position(i)[0] for i in range(49,250,50)]
             formatted_position_values = [bp_formatter.format_eng(value) for value in position_values]
             titles = [values.references[0],values.references[1],values.references[2],values.references[3]]
             ax_heatmap_obs = f.add_subplot(gs[0, i])
-            ax_heatmap_obs.imshow(values.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_obs.imshow(values.observed_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
             ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   Observed' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_obs.set_yticks([0, 50, 100, 150, 200, 250])
             ax_heatmap_obs.set_yticklabels(formatted_position_values)
             ax_heatmap_obs.set_xticks([0, 50, 100, 150, 200, 250])
             ax_heatmap_obs.set_xticklabels(formatted_position_values)
             ax_heatmap_exp = f.add_subplot(gs[1, i])
-            ax_heatmap_exp.imshow(values.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_exp.imshow(values.predicted_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
             ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   predicted' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_exp.set_yticks([0, 50, 100, 150, 200, 250])
             ax_heatmap_exp.set_yticklabels(formatted_position_values)
@@ -308,6 +316,7 @@ class OrcaMatrices():
         else :
             plt.show()
     
+    
     def save_multi_graphs(self, output_file: str = None):
         """
         Function to save in a pdf file the heatmap and the insulation scores as well as PC1 values, represented in two separated graphs, corresponding to the relevent OrcaMatrix for each resolution
@@ -317,6 +326,7 @@ class OrcaMatrices():
         gs = GridSpec(nrows=6, ncols=len(self.matrices), height_ratios=[4, 0.25, 0.25, 4, 0.25, 0.25])
         f = plt.figure(clear=True, figsize=(120, 44))
         i=0
+        cmap=hnh_cmap_ext5
         
         with PdfPages(output_file, keep_empty=False) as pdf:
             for key, values in self.matrices.items():
@@ -326,7 +336,7 @@ class OrcaMatrices():
                 
                 # Heatmap_obs
                 ax_heatmap_obs = f.add_subplot(gs[0, i])
-                ax_heatmap_obs.imshow(values.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+                ax_heatmap_obs.imshow(values.observed_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
                 format_ticks(ax_heatmap_obs, x=False, y=False)
                 ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   Observed' % (titles[0], titles[1], titles[2],titles[3]))
                 ax_heatmap_obs.set_yticks([0,50,100,150,200,250])
@@ -352,7 +362,7 @@ class OrcaMatrices():
 
                 # Heatmap_exp
                 ax_heatmap_exp = f.add_subplot(gs[3, i])
-                ax_heatmap_exp.imshow(values.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+                ax_heatmap_exp.imshow(values.predicted_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
                 format_ticks(ax_heatmap_exp, x=False, y=False)
                 ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   predicted' % (titles[0], titles[1], titles[2],titles[3]))
                 ax_heatmap_exp.set_yticks([0,50,100,150,200,250])

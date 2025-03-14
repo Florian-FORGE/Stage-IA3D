@@ -5,6 +5,8 @@ import textwrap
 import numpy as np
 import os
 
+import cooler
+
 """
 Analyse of many pair of orca matrices (observed and predicted), varying in resolution, including insulation scores, PC1 values and the corresponding heatmaps
 
@@ -44,24 +46,105 @@ def read_orca_matrix(orcafile):
     matrix = np.loadtxt(orcafile, skiprows=1)
     return type, region, resolution, matrix
 
+def read_cool_resol_perso(filepath: str, resol, start, end, saturation: float = 1):
+    """
+    Function to read a cool file and extract the needed data (the observed matrix) for the creation of an OrcaMatrix object.
+    The data extracted is a dataframe of the occurences of observed interactions and needs to be put into the right format before using it.
+    Diminishing the saturation value reduces the intensity of the values and increasing it may result in loss of information (it is recommended that the intensity stays equal to 1)
+    """
+    path = filepath
+    coolres = "%s::resolutions/%d" % (path, resol)
+    clr = cooler.Cooler(coolres)
+    region = ('chr9', start, end)
+    mat = clr.matrix(balance=False).fetch(region)
+    mat[mat <= 0] = 1
+    mat = np.nan_to_num(mat, nan=1e-10)
+    mat_log = np.log(np.maximum(mat, saturation)) #by changing the value in the np.maximum method, it changes the intensity of the values (and with it the saturation of the heatmap --lower values => more saturation) 
+    mat_exp = normmats_matrix(mat)
+    matrix = obs_over_exp_matrix(mat_log,mat_exp)
 
-def create_OrcaMatrix(orcafile, coolfile):
+    # Ensure no infinite values
+    matrix[np.isinf(matrix)] = np.finfo(np.float64).max
+    
+    return matrix
+
+
+def normmats_matrix(matrix: np.ndarray) -> np.ndarray:
+    """
+    Function producing a normalized matrix, corresponding to the expected matrix, produced by filling the diagonals with their mean value.
+    It is supposed that the matrix is filled with the counted values (not the log values)
+    """
+    mean_diag=[]
+    result_matrix = np.zeros_like(matrix)
+    for i in range(len(matrix)):
+        diag=matrix.diagonal(i)
+        mean_diag.append(diag.mean())
+        np.fill_diagonal(result_matrix[:, i:], mean_diag[i])
+        if i != 0:
+            np.fill_diagonal(result_matrix[i:, :], mean_diag[i])
+    result_matrix[result_matrix <= 0] = 1e-10
+    return result_matrix
+
+def log_matrix(matrix: np.ndarray):
+    """
+    Function that returns the matrix with the log values
+    """
+    result_matrix = np.log(matrix)
+    return result_matrix
+
+def obs_over_exp_matrix(obs_matrix: np.ndarray,exp_matrix: np.ndarray):
+    """
+    Function producing the observed (or predicted) over expected matrix by substracting the log(exp_matrix) to the obs_matrix.
+    It is supposed that the obs_matrix has already the log values of the counts and that the exp_matrix
+    """
+    if len(obs_matrix)==len(exp_matrix):
+        log_exp_matrix = log_matrix(exp_matrix)
+        result_matrix = np.subtract(obs_matrix, log_exp_matrix)
+        return result_matrix
+    else : 
+        print("error : the matrices do not have the same length")
+
+def reverse_obs_over_exp_matrix(matrix: np.ndarray,exp_matrix: np.ndarray):
+    """
+    Funtion that returns the observed (or predicted) matrix from a observed (or predicted) over expected matrix
+    It is supposed that the matrix is log(obs/exp) and that exp_matrix is not log
+    """
+    if len(matrix)==len(exp_matrix):
+        log_exp_matrix = log_matrix(exp_matrix)
+        result_matrix = np.add(matrix,log_exp_matrix)
+        return result_matrix
+    else :
+        print("error : the matrices do not have the same length")
+
+
+def create_OrcaMatrix(orcafile, cool_matrix):
     orca_mat = read_orca_matrix(orcafile)
-    cool_matrix = read_orca_matrix(coolfile) #for now just to test the function because I don't have the cool file
-    return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix[3], orca_mat[3])
+    return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix, orca_mat[3])
 
 
-def create_OrcaMatrices(orca1, orca2, orca3, orca4, orca5, orca6, cool1, cool2, cool3, cool4, cool5, cool6):
+def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile):
     """
     Function to create an OrcaMatrices object from 12 matrices paired by resolution (orca1 goes with cool1, orca referring to an predicted matix and cool to an observed matrix)
     The resolution should be in decrescendo order (from 32Mb to 1Mb) for better readability (simply recommended and not necessary)
     """
-    matrix1=create_OrcaMatrix(orca1,cool1)
-    matrix2=create_OrcaMatrix(orca2,cool2)
-    matrix3=create_OrcaMatrix(orca3,cool3)
-    matrix4=create_OrcaMatrix(orca4,cool4)
-    matrix5=create_OrcaMatrix(orca5,cool5)
-    matrix6=create_OrcaMatrix(orca6,cool6)
+    orca_files = [orca_1, orca_2, orca_3, orca_4, orca_5, orca_6]
+    cool_matrices = []
+    for i in range(len(orca_files)):
+        metadata = extract_metadata_to_dict(orca_files[i])
+        if metadata:
+            resol = int(metadata['resol'].replace('Mb', '000000'))
+            resol/=250
+            start = int(metadata['start'])
+            end = int(metadata['end'])
+            cool_matrix = read_cool_resol_perso(coolfile, resol, start, end)
+            cool_matrices.append(cool_matrix)
+            
+    matrix1 = create_OrcaMatrix(orca_1,cool_matrices[0])
+    matrix2 = create_OrcaMatrix(orca_2,cool_matrices[1])
+    matrix3 = create_OrcaMatrix(orca_3,cool_matrices[2])
+    matrix4 = create_OrcaMatrix(orca_4,cool_matrices[3])
+    matrix5 = create_OrcaMatrix(orca_5,cool_matrices[4])
+    matrix6 = create_OrcaMatrix(orca_6,cool_matrices[5])
 
     di={
     "%s" %matrix1.resolution : matrix1,
@@ -76,8 +159,8 @@ def create_OrcaMatrices(orca1, orca2, orca3, orca4, orca5, orca6, cool1, cool2, 
 
 
 
-def main(orcafile1, coolfile1, orcafile2, coolfile2, orcafile3, coolfile3, orcafile4, coolfile4, orcafile5, coolfile5, orcafile6, coolfile6, output_scores, output_heatmaps, output_graphs):
-    orca_matrices=create_OrcaMatrices(orcafile1, orcafile2, orcafile3, orcafile4, orcafile5, orcafile6, coolfile1, coolfile2, coolfile3, coolfile4, coolfile5, coolfile6)
+def main(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile, output_scores, output_heatmaps, output_graphs):
+    orca_matrices=create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile)
     output_scores_path=os.path.join("Orcanalyse/Outputs", output_scores)
     with open(output_scores_path, 'w') as f:
         for key, values in orca_matrices.matrices.items():
@@ -104,29 +187,19 @@ def parse_arguments():
                                      description=textwrap.dedent('''\
                                      Calculates the insultion and PC1 scores from an Orca file and outputs them and the corresponding heatmap
                                      '''))
-    parser.add_argument('--orcafile1',
+    parser.add_argument('--orca_1',
                         required=True, help='the orca file 1 containing the predicted matrix, with the first line containing metadata')
-    parser.add_argument('--coolfile1',
-                        required=True, help='the cool file 1 containing the observed matrix')
-    parser.add_argument('--orcafile2',
+    parser.add_argument('--orca_2',
                         required=True, help='the orca file 2 containing the predicted matrix, with the first line containing metadata')
-    parser.add_argument('--coolfile2',
-                        required=True, help='the cool file 2 containing the observed matrix')
-    parser.add_argument('--orcafile3',
+    parser.add_argument('--orca_3',
                         required=True, help='the orca file 3 containing the predicted matrix, with the first line containing metadata')
-    parser.add_argument('--coolfile3',
-                        required=True, help='the cool file 3 containing the observed matrix')
-    parser.add_argument('--orcafile4',
+    parser.add_argument('--orca_4',
                         required=True, help='the orca file 4 containing the predicted matrix, with the first line containing metadata')
-    parser.add_argument('--coolfile4',
-                        required=True, help='the cool file 4 containing the observed matrix')
-    parser.add_argument('--orcafile5',
+    parser.add_argument('--orca_5',
                         required=True, help='the orca file 5 containing the predicted matrix, with the first line containing metadata')
-    parser.add_argument('--coolfile5',
-                        required=True, help='the cool file 5 containing the observed matrix')
-    parser.add_argument('--orcafile6',
+    parser.add_argument('--orca_6',
                         required=True, help='the orca file 6 containing the predicted matrix, with the first line containing metadata')
-    parser.add_argument('--coolfile6',
+    parser.add_argument('--coolfile',
                         required=True, help='the cool file 6 containing the observed matrix')
     parser.add_argument('--output_scores',
                         required=True, help='the outputs insulation scores and PC1')
@@ -142,4 +215,4 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    main(args.orcafile1, args.coolfile1, args.orcafile2, args.coolfile2, args.orcafile3, args.coolfile3, args.orcafile4, args.coolfile4, args.orcafile5, args.coolfile5, args.orcafile6, args.coolfile6, args.output_scores, args.output_heatmaps, args.output_graphs)
+    main(args.orca_1, args.orca_2, args.orca_3, args.orca_4, args.orca_5, args.orca_6, args.coolfile, args.output_scores, args.output_heatmaps, args.output_graphs)

@@ -68,10 +68,11 @@ def read_orca_matrix(orcafile: str):
     matrix = np.loadtxt(orcafile, skiprows=1)
     return _type, region, resolution, matrix
 
-def read_cool(filepath: str):
+def read_cool(filepath: str, saturation: float = 1):
     """
     Function to read a cool file and extract the needed data (the observed matrix) for the creation of an OrcaMatrix object.
     The data extracted is a dataframe of the occurences of observed interactions and needs to be put into the right format before using it.
+    Diminishing the saturation value reduces the intensity of the values and increasing it may result in loss of information (it is recommended that the intensity do not exceed 10)
     """
     path = filepath
     resolution = 128_000
@@ -82,7 +83,7 @@ def read_cool(filepath: str):
     mat = clr.matrix(balance=False).fetch(region)
     mat[mat <= 0] = 1e-10
     mat = np.nan_to_num(mat, nan=1e-10)
-    mat_log = np.log(np.maximum(mat, 1)) #by changing the value (e.g. 1) in the np.maximum method, it changes the intensity of the values (and with it the saturation of the heatmap --lower values => more saturation) 
+    mat_log = np.log(np.maximum(mat, saturation)) #by changing the value in the np.maximum method, it changes the intensity of the values (and with it the saturation of the heatmap --lower values => more saturation) 
     mat_exp = normmats_matrix(mat)
     matrix = obs_over_exp_matrix(mat_log,mat_exp)
 
