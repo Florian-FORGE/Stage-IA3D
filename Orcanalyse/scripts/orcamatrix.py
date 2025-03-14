@@ -18,7 +18,7 @@ The rest of the file should contain the matrix itself
 
 class OrcaMatrix ():
     """
-    Class associated to a particular associatopn --observed matrix, expected matrix--
+    Class associated to a particular associatopn --observed matrix, predicted matrix--
 
     For a given region, resolution and matrix, it will provide through methodes the following:
     - The insulation score
@@ -33,16 +33,16 @@ class OrcaMatrix ():
         the resolution of the matrix ()
     - observed_matrix: np.ndarray
         the observed matrix
-    - expected_matrix: np.ndarray
-        the expected matrix
+    - predicted_matrix: np.ndarray
+        the predicted matrix
     """
 
-    def __init__(self, region: list, resolution: str, observed_matrix: np.ndarray, expected_matrix: np.ndarray):
+    def __init__(self, region: list, resolution: str, observed_matrix: np.ndarray, predicted_matrix: np.ndarray):
         self.region = region
         self.resolution = resolution
         self.observed_matrix = observed_matrix
-        self.expected_matrix = expected_matrix
-        self.div_matrix = np.divide(observed_matrix, expected_matrix)
+        self.predicted_matrix = predicted_matrix
+        # self.div_matrix = np.divide(observed_matrix, predicted_matrix)
     
     @property
     def references(self):
@@ -52,13 +52,13 @@ class OrcaMatrix ():
     
     @property
     def get_matrices(self):
-        return self.observed_matrix, self.expected_matrix
+        return self.observed_matrix, self.predicted_matrix
     
     def get_insulation_scores(self):
         """
-        Function to compute the insulation scores, in a list, for the observed matrix and for the expected matrix. They are stored in a list in this order.
+        Function to compute the insulation scores, in a list, for the observed matrix and for the predicted matrix. They are stored in a list in this order.
         """
-        matrix_obs, matrix_exp = self.observed_matrix, self.expected_matrix
+        matrix_obs, matrix_exp = self.observed_matrix, self.predicted_matrix
         n = len(matrix_obs)
         w=5
         scores=[[],[]]
@@ -75,14 +75,14 @@ class OrcaMatrix ():
     
     def get_PC1(self):
         """
-        Function to compute the PC1 values for the observed matrix and for the expected matrix. They are stored in a list in this order.
+        Function to compute the PC1 values for the observed matrix and for the predicted matrix. They are stored in a list in this order.
         """
         # Initialize PCA model
         pca_obs = PCA(n_components=1)
         pca_exp = PCA(n_components=1)
         # Fit the model and transform the matrix
         principal_components_obs = pca_obs.fit_transform(self.observed_matrix)
-        principal_components_exp = pca_exp.fit_transform(self.expected_matrix)
+        principal_components_exp = pca_exp.fit_transform(self.predicted_matrix)
         # Extract the first principal component
         pc1_obs = principal_components_obs[:, 0]
         pc1_exp = principal_components_exp[:, 0]
@@ -131,7 +131,7 @@ class OrcaMatrix ():
         ax_heatmap_obs.set_xticks([0, 50, 100, 150, 200, 250])
         ax_heatmap_obs.set_xticklabels(formatted_position_values)
         ax_heatmap_exp = f.add_subplot(gs[1, 0])
-        ax_heatmap_exp.imshow(self.expected_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+        ax_heatmap_exp.imshow(self.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
         ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
         ax_heatmap_exp.set_yticks([0, 50, 100, 150, 200, 250])
         ax_heatmap_exp.set_yticklabels(formatted_position_values)
@@ -191,7 +191,7 @@ class OrcaMatrix ():
 
             # Heatmap_exp
             ax_heatmap_exp = f.add_subplot(gs[3, 0])
-            ax_heatmap_exp.imshow(self.expected_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_exp.imshow(self.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
             format_ticks(ax_heatmap_exp, x=False, y=False)
             ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_exp.set_yticks([0,50,100,150,200,250])
@@ -249,55 +249,55 @@ class OrcaMatrices():
     
     Parameter:
     - matrices: dictionary of OrcaMatrix objects
-        the dictonary build with resolutions as keys and the Orcamatrix objects as items
+        the dictonary build with resolutions as keys and the Orcamatrix objects as values
     
     Attributes:
     - regions: dict of lists of 3 elements
         the regions, given in a list [chr, start, end], are assigned to their corresponding matrix according to the resolution used as a key
     -observed_matrices: dict of np.ndarray
         the observed matrices are assigned to their resolution in a dictionary
-    -expected_matrices: dict of np.ndarray
-        the expected matrices are assigned to their resolution in a dictionary
+    -predicted_matrices: dict of np.ndarray
+        the predicted matrices are assigned to their resolution in a dictionary
 
     """
     def __init__(self, matrices: dict):
         self.matrices=matrices
         self.regions={}
         self.observed_matrices={}
-        self.expected_matrices={}
+        self.predicted_matrices={}
     
     def __set_regions__(self):
-        for key, item in self.matrices:
-            self.regions[key]=item.region
+        for key, values in self.matrices.items():
+            self.regions[key]=values.region
 
     def __set_observed_matrices__(self):
-        for key, item in self.matrices:
-            self.observed_matrices[key]=item.observed_matrix
+        for key, values in self.matrices.items():
+            self.observed_matrices[key]=values.observed_matrix
     
-    def __set_expected_matrices__(self):
-        for key, item in self.matrices:
-            self.expected_matrices[key]=item.expected_matrix
+    def __set_predicted_matrices__(self):
+        for key, values in self.matrices.items():
+            self.predicted_matrices[key]=values.predicted_matrix
     
     def multi_heatmaps(self,output_file: str = None):
         bp_formatter = EngFormatter('b', places=1)
         gs = GridSpec(nrows=2, ncols=6)
-        f = plt.figure(clear=True, figsize=(10, 20)) #it will most likely necessary to change the figsize
+        f = plt.figure(clear=True, figsize=(60, 20))
         i=0
 
-        for key, item in self.matrices:
-            position_values = [item.get_corresponding_position(0)[0]] + [item.get_corresponding_position(i)[0] for i in range(49,250,50)]
+        for key, values in self.matrices.items():
+            position_values = [values.get_corresponding_position(0)[0]] + [values.get_corresponding_position(i)[0] for i in range(49,250,50)]
             formatted_position_values = [bp_formatter.format_eng(value) for value in position_values]
-            titles = [item.references[0],item.references[1],item.references[2],item.references[3]]
+            titles = [values.references[0],values.references[1],values.references[2],values.references[3]]
             ax_heatmap_obs = f.add_subplot(gs[0, i])
-            ax_heatmap_obs.imshow(item.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
-            ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
+            ax_heatmap_obs.imshow(values.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   Observed' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_obs.set_yticks([0, 50, 100, 150, 200, 250])
             ax_heatmap_obs.set_yticklabels(formatted_position_values)
             ax_heatmap_obs.set_xticks([0, 50, 100, 150, 200, 250])
             ax_heatmap_obs.set_xticklabels(formatted_position_values)
             ax_heatmap_exp = f.add_subplot(gs[1, i])
-            ax_heatmap_exp.imshow(item.expected_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
-            ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
+            ax_heatmap_exp.imshow(values.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+            ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   predicted' % (titles[0], titles[1], titles[2],titles[3]))
             ax_heatmap_exp.set_yticks([0, 50, 100, 150, 200, 250])
             ax_heatmap_exp.set_yticklabels(formatted_position_values)
             ax_heatmap_exp.set_xticks([0, 50, 100, 150, 200, 250])
@@ -314,64 +314,64 @@ class OrcaMatrices():
             
         """
         bp_formatter = EngFormatter('b', places=1)
-        gs = GridSpec(nrows=6, ncols=len(self.matrices))
-        f = plt.figure(clear=True, figsize=(20, 44)) #it will most likely necessary to change the figsize
+        gs = GridSpec(nrows=6, ncols=len(self.matrices), height_ratios=[4, 0.25, 0.25, 4, 0.25, 0.25])
+        f = plt.figure(clear=True, figsize=(120, 44))
         i=0
         
         with PdfPages(output_file, keep_empty=False) as pdf:
-            for key, item in self.matrices:
-                position_values = [item.get_corresponding_position(0)[0]] + [item.get_corresponding_position(i)[0] for i in range(49,250,50)]
+            for key, values in self.matrices.items():
+                position_values = [values.get_corresponding_position(0)[0]] + [values.get_corresponding_position(i)[0] for i in range(49,250,50)]
                 formatted_position_values = [bp_formatter.format_eng(value) for value in position_values]
-                titles = [item.references[0],item.references[1],item.references[2],item.references[3]]
+                titles = [values.references[0],values.references[1],values.references[2],values.references[3]]
                 
                 # Heatmap_obs
-                ax_heatmap_obs = f.add_subplot(gs[i, 0])
-                ax_heatmap_obs.imshow(item.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+                ax_heatmap_obs = f.add_subplot(gs[0, i])
+                ax_heatmap_obs.imshow(values.observed_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
                 format_ticks(ax_heatmap_obs, x=False, y=False)
-                ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
+                ax_heatmap_obs.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   Observed' % (titles[0], titles[1], titles[2],titles[3]))
                 ax_heatmap_obs.set_yticks([0,50,100,150,200,250])
                 ax_heatmap_obs.set_yticklabels(formatted_position_values)
                 ax_heatmap_obs.set_xticks([0,50,100,150,200,250])
                 ax_heatmap_obs.set_xticklabels(formatted_position_values)
                         
                 # Insulation scores_obs
-                ax_insulation_obs = f.add_subplot(gs[i+1, 0])
+                ax_insulation_obs = f.add_subplot(gs[1, i])
                 ax_insulation_obs.set_xlim(0, 250)
-                ax_insulation_obs.plot(item.get_insulation_scores()[0], color='blue')
+                ax_insulation_obs.plot(values.get_insulation_scores()[0], color='blue')
                 ax_insulation_obs.set_ylabel('Insulation Scores')
                 ax_insulation_obs.set_xticks([0,50,100,150,200,250])
                 ax_insulation_obs.set_xticklabels(formatted_position_values)
                 
                 # PC1 values
-                ax_pc1_obs = f.add_subplot(gs[i+2, 0])
+                ax_pc1_obs = f.add_subplot(gs[2, i])
                 ax_pc1_obs.set_xlim(0, 250)
-                ax_pc1_obs.plot(item.get_PC1()[0], color='green')
+                ax_pc1_obs.plot(values.get_PC1()[0], color='green')
                 ax_pc1_obs.set_ylabel('PC1 Values')
                 ax_pc1_obs.set_xticks([0,50,100,150,200,250])
                 ax_pc1_obs.set_xticklabels(formatted_position_values)
 
                 # Heatmap_exp
-                ax_heatmap_exp = f.add_subplot(gs[i+3, 0])
-                ax_heatmap_exp.imshow(item.expected_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
+                ax_heatmap_exp = f.add_subplot(gs[3, i])
+                ax_heatmap_exp.imshow(values.predicted_matrix, cmap='OrRd', interpolation='nearest', aspect='auto')
                 format_ticks(ax_heatmap_exp, x=False, y=False)
-                ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
+                ax_heatmap_exp.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s -   predicted' % (titles[0], titles[1], titles[2],titles[3]))
                 ax_heatmap_exp.set_yticks([0,50,100,150,200,250])
                 ax_heatmap_exp.set_yticklabels(formatted_position_values)
                 ax_heatmap_exp.set_xticks([0,50,100,150,200,250])
                 ax_heatmap_exp.set_xticklabels(formatted_position_values)
                 
                 # Insulation scores_exp
-                ax_insulation_exp = f.add_subplot(gs[i+4, 0])
+                ax_insulation_exp = f.add_subplot(gs[4, i])
                 ax_insulation_exp.set_xlim(0, 250)
-                ax_insulation_exp.plot(item.get_insulation_scores()[1], color='blue')
+                ax_insulation_exp.plot(values.get_insulation_scores()[1], color='blue')
                 ax_insulation_exp.set_ylabel('Insulation Scores')
                 ax_insulation_exp.set_xticks([0,50,100,150,200,250])
                 ax_insulation_exp.set_xticklabels(formatted_position_values)
 
                 # PC1 values
-                ax_pc1_exp = f.add_subplot(gs[i+5, 0])
+                ax_pc1_exp = f.add_subplot(gs[5, i])
                 ax_pc1_exp.set_xlim(0, 250)
-                ax_pc1_exp.plot(item.get_PC1()[1], color='green')
+                ax_pc1_exp.plot(values.get_PC1()[1], color='green')
                 ax_pc1_exp.set_ylabel('PC1 Values')
                 ax_pc1_exp.set_xticks([0,50,100,150,200,250])
                 ax_pc1_exp.set_xticklabels(formatted_position_values)
