@@ -6,6 +6,8 @@ import numpy as np
 import os
 
 import cooler
+from cooltools.lib.numutils import adaptive_coarsegrain
+from cooltools.lib.numutils import observed_over_expected
 
 """
 Analyse of many pair of orca matrices (observed and predicted), varying in resolution, including insulation scores, PC1 values and the corresponding heatmaps
@@ -37,8 +39,7 @@ def read_orca_matrix(orcafile):
     """
     metadata=extract_metadata_to_dict(orcafile)
     type = metadata['Orca']
-    # chrom = metadata['region'].split(':')[0]
-    chrom = "1" #just for testing
+    chrom = metadata['chrom']
     start = int(metadata['start'])
     end = int(metadata['end'])
     region = [chrom, start, end]
@@ -46,25 +47,45 @@ def read_orca_matrix(orcafile):
     matrix = np.loadtxt(orcafile, skiprows=1)
     return type, region, resolution, matrix
 
-def read_cool_resol_perso(filepath: str, resol, start, end, saturation: float = 1):
+def read_cool_resol_perso(filepath: str, resol, chrom, start, end):
     """
     Function to read a cool file and extract the needed data (the observed matrix) for the creation of an OrcaMatrix object.
     The data extracted is a dataframe of the occurences of observed interactions and needs to be put into the right format before using it.
-    Diminishing the saturation value reduces the intensity of the values and increasing it may result in loss of information (it is recommended that the intensity stays equal to 1)
     """
     path = filepath
     coolres = "%s::resolutions/%d" % (path, resol)
     clr = cooler.Cooler(coolres)
-    region = ('chr9', start, end)
-    mat = clr.matrix(balance=False).fetch(region)
-    mat[mat <= 0] = 1
+    _chrom = 'chr' + chrom
+    region = (_chrom, start, end)
+    mat = clr.matrix(balance=True).fetch(region)
+    mat[mat <= 0] = 1e-3
     mat = np.nan_to_num(mat, nan=1e-10)
-    mat_log = np.log(np.maximum(mat, saturation)) #by changing the value in the np.maximum method, it changes the intensity of the values (and with it the saturation of the heatmap --lower values => more saturation) 
+    mat_log = np.log(mat) 
     mat_exp = normmats_matrix(mat)
     matrix = obs_over_exp_matrix(mat_log,mat_exp)
 
     # Ensure no infinite values
     matrix[np.isinf(matrix)] = np.finfo(np.float64).max
+    
+    return matrix
+
+def read_cool_cooltools(filepath: str, chrom, start, end, resolution):
+    """
+    Function to read a cool file and extract the needed data (the observed matrix) for the creation of an OrcaMatrix object, using cooltools functions.
+    The data extracted is a dataframe of the occurences of observed interactions and needs to be put into the right format before using it.
+    Diminishing the saturation value reduces the intensity of the values and increasing it may result in loss of information (it is recommended that the intensity do not exceed 10)
+    """
+    coolres = "%s::resolutions/%d" % (filepath, resolution)
+    clr = cooler.Cooler(coolres)
+    _chrom = 'chr' + chrom
+    region = (_chrom, start, end)
+
+    mat_raw = clr.matrix(balance=False).fetch(region)
+    mat_balanced = clr.matrix(balance=True).fetch(region)
+    
+    mat = adaptive_coarsegrain(mat_balanced, mat_raw, max_levels = 12) 
+    
+    matrix = get_observed_over_expected(mat)
     
     return matrix
 
@@ -83,7 +104,18 @@ def normmats_matrix(matrix: np.ndarray) -> np.ndarray:
         if i != 0:
             np.fill_diagonal(result_matrix[i:, :], mean_diag[i])
     result_matrix[result_matrix <= 0] = 1e-10
-    return result_matrix
+    return result_matrix, mean_diag
+
+def get_observed_over_expected(mat):
+    """
+    Function using the observed_over_expected function defined in cooltools to produce the eponyme matrix
+    """
+    A = mat
+    A[~np.isfinite(A)] = 0
+    mask = A.sum(axis=0) > 0
+    OE, _, _, _ = observed_over_expected(A, mask)
+    return OE
+
 
 def log_matrix(matrix: np.ndarray):
     """
@@ -117,12 +149,12 @@ def reverse_obs_over_exp_matrix(matrix: np.ndarray,exp_matrix: np.ndarray):
         print("error : the matrices do not have the same length")
 
 
-def create_OrcaMatrix(orcafile, cool_matrix):
+def create_OrcaMatrix(orcafile, cool_matrix) -> OrcaMatrix:
     orca_mat = read_orca_matrix(orcafile)
     return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix, orca_mat[3])
 
 
-def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile):
+def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile) -> OrcaMatrices:
     """
     Function to create an OrcaMatrices object from 12 matrices paired by resolution (orca1 goes with cool1, orca referring to an predicted matix and cool to an observed matrix)
     The resolution should be in decrescendo order (from 32Mb to 1Mb) for better readability (simply recommended and not necessary)
@@ -132,11 +164,12 @@ def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile
     for i in range(len(orca_files)):
         metadata = extract_metadata_to_dict(orca_files[i])
         if metadata:
-            resol = int(metadata['resol'].replace('Mb', '000000'))
+            resol = int(metadata['resol'].replace('Mb', '_000_000'))
             resol/=250
             start = int(metadata['start'])
             end = int(metadata['end'])
-            cool_matrix = read_cool_resol_perso(coolfile, resol, start, end)
+            chrom = metadata['chrom']
+            cool_matrix = read_cool_cooltools(coolfile, chrom, start, end, resol)
             cool_matrices.append(cool_matrix)
             
     matrix1 = create_OrcaMatrix(orca_1,cool_matrices[0])
