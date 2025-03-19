@@ -6,8 +6,7 @@ import numpy as np
 import os
 
 import cooler
-from cooltools.lib.numutils import adaptive_coarsegrain
-from cooltools.lib.numutils import observed_over_expected
+from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
 
 """
 Analyse of many pair of orca matrices (observed and predicted), varying in resolution, including insulation scores, PC1 values and the corresponding heatmaps
@@ -113,7 +112,7 @@ def get_observed_over_expected(mat):
     A = mat
     A[~np.isfinite(A)] = 0
     mask = A.sum(axis=0) > 0
-    OE, _, _, _ = observed_over_expected(A, mask)
+    OE, _, _, _ = observed_over_expected(A, mask, dist_bin_edge_ratio=1.03)
     return OE
 
 

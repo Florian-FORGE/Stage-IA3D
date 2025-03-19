@@ -4,16 +4,9 @@ import argparse
 import textwrap
 import numpy as np
 import os
-import pandas as pd
 
-import cooltools
-import cooltools.api.expected as ct
 import cooler
-from matplotlib.ticker import EngFormatter
-import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
-from cooltools.lib.numutils import adaptive_coarsegrain
-from cooltools.lib.numutils import observed_over_expected
+from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
 
 """
 Analyse of a pair of orca matrices (observed and predicted) including insulation scores, PC1 values and the corresponding heatmaps
@@ -25,19 +18,7 @@ The rest of the file should contain the matrix itself
 
 """
 
-def format_ticks(ax, x=True, y=True, rotate=True):
-    """
-    Function to format the ticks of a plot and enabling changes in the values of the ticks
-    """
-    bp_formatter = EngFormatter('b')
 
-    if y:
-        ax.yaxis.set_major_formatter(bp_formatter)
-    if x:
-        ax.xaxis.set_major_formatter(bp_formatter)
-        ax.xaxis.tick_bottom()
-    if rotate:
-        ax.tick_params(axis='x',rotation=45)
 
 
 
@@ -144,7 +125,7 @@ def get_observed_over_expected(mat):
     A = mat
     A[~np.isfinite(A)] = 0
     mask = A.sum(axis=0) > 0
-    OE, _, _, _ = observed_over_expected(A, mask)
+    OE, _, _, _ = observed_over_expected(A, mask, dist_bin_edge_ratio=1.03)
     return OE
 
 
