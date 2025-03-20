@@ -11,6 +11,13 @@ sys.path.append("/home/fforge/orca")
 import orca_predict
 from orca_utils import genomeplot
 from selene_sdk.sequences import Genome
+# import torch
+
+import logging
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 """
 Functions adapted from Cytogene3D using Orca ressources to predict the Hi-C observed over expected matrices
@@ -30,24 +37,81 @@ def set_mpos(mpos):
 
 
 def get_sequence(fasta, chrom, start: int = None, end: int = None):
-    """ Using pysam Fasta to retrieve the sequence"""
+    """
+    Retrieve a 32Mb genomic sequence from a FASTA file.
+
+    Parameters:
+        fasta (str): Path to the FASTA file.
+        chrom (str): Chromosome name.
+        start (int, optional): Start position (1-based).
+        end (int, optional): End position (1-based).
+
+    Returns:
+        tuple: (sequence (str), chromlen (int), mpos (int))
+    """
+    _mpos = -1
+    
     genome = Fasta(fasta)
-    sequence = str(genome[chrom][start : end])
-    # Check that the sequence is a 32Mb sequence
-    if start and end and len(sequence) != 32_000_000:
-        print("The fasta sequence must be exactly of size 32000000. Exiting...")
-        exit(1)
-    elif len(sequence) != 32_000_000 and start:
+    chromlen = len(genome[chrom])
+
+    # Check the start and end values (if given) are acceptable
+    if start and chromlen < start + 32_000_000 :
+        mpos = start + 16_000_000
+        start = chromlen - 32_000_000
+        _mpos = mpos - start 
+        logging.warning("Start position has been adjusted to ensure the sequence is 32Mb long")
+            
+    if end and end - 32_000_000 < 0 :
+        _mpos = end - 16_000_000
+        end = 32_000_000
+        logging.warning("End position has been adjusted to ensure the sequence is 32Mb long")
+    
+    # Check that the sequence is a 32Mb sequence and extract it
+    if start and end and (end - start) != 32_000_000:
+        raise ValueError("The FASTA sequence must be exactly 32Mb in size.")
+    elif start and end and (end - start) == 32_000_000 :
+        sequence = str(genome[chrom][start : end])
+    elif start and (chromlen - start) >= 32_000_000 :
       sequence = str(genome[chrom][start : start + 32_000_000])
-      print("WarningMessage : Missing end argument and sequence too long, sequence has been restrained to a 32Mb length from start")
-    elif len(sequence) != 32_000_000 and end:
+      logging.info("Missing end argument and sequence too long, sequence has been restrained to a 32Mb length from start")
+    elif end and end >= 32_000_000 :
       sequence = str(genome[chrom][end - 32_000_000 : end])
-      print("WarningMessage : Missing start argument and sequence too long, sequence has been restrained to a 32Mb length ending at end")
-    return sequence
+      logging.info("Missing start argument and sequence too long, sequence has been restrained to a 32Mb length ending at end")
+    elif len(sequence) != 32_000_000:
+        raise ValueError("The FASTA sequence must be exactly 32Mb in size.")
+    else :
+        start = 0
+        sequence = str(genome[chrom][ : ])
+    
+    return sequence, chromlen, _mpos, start
 
 
 def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen):
+    """
+    Save prediction and normalized matrices at multiple resolutions to text files.
 
+    Parameters:
+        - predict (dict): A dictionary containing prediction results. Keys include:
+                        - 'predictions': List of prediction matrices for each resolution.
+                        - 'normmats': List of normalized matrices for each resolution.
+        - output_prefix (str): The prefix for output file names. A directory with this name will be created if it doesn't exist.
+        - offset (int): The offset to adjust start and end coordinates.
+        - mpos (int): The midpoint position of the sequence.
+        - wpos (int): The window position (midpoint of the sequence).
+        - mutation (str): Description of the mutation (if any).
+        - chrom (str): Chromosome name.
+        - chromlen (int): Length of the chromosome.
+
+    Returns:
+        None
+
+    Side Effects:
+        - Writes prediction and normalized matrices to text files.
+        - Creates a log file with matrix coordinates.
+
+    Example:
+        dump_target_matrix(predict, "output", 1000, 16000000, 16000000, "mutation", "chr1", 248956422)
+    """
     if output_prefix and not os.path.exists(output_prefix):
         os.makedirs(output_prefix)
 
@@ -78,28 +142,79 @@ def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chr
             fout.write("%s\t%s\t%d\t%d\n" % (resol, chrom, start + offset, end + offset))
 
 
-def main(fasta, chrom, output_prefix, mutation, mpos=-1, use_cuda=True):
+def main(chrom, output_prefix, mutation, mpos=-1, fasta=None, use_cuda=True):
     """
+    Run the Orca prediction pipeline to generate Hi-C matrices from a genomic sequence.
+
+    Parameters:
+        fasta (str): Path to the FASTA file containing the genomic sequence.
+        chrom (str): Chromosome name to extract the sequence from.
+        output_prefix (str): The prefix for output files (e.g., .pkl, .pdf, and text files).
+        mutation (str): Description of the mutation (if any).
+        mpos (int, optional): The midpoint position to zoom into for multiscale prediction. Defaults to -1.
+        use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to True.
+
+    Returns:
+        None
+
+    Side Effects:
+        - Loads Orca models and resources.
+        - Extracts and encodes a genomic sequence.
+        - Runs predictions and saves results to disk (e.g., .pkl, .pdf, and text files).
+        - Logs information about the process.
+
+    Example:
+        main("genome.fasta", "chr1", "output", "mutation", mpos=16000000, use_cuda=True)
     """
-    offset = max(0, mpos - 16_000_000)
+    # if use_cuda and not torch.cuda.is_available():
+    #     raise RuntimeError("CUDA is not available on this system.")
+    if fasta :
+        if mpos != -1 and mpos <= 16_000_000 :
+            _mpos = mpos
+            off_start = 0
+            sequence, chromlen, _, offset = get_sequence(fasta, chrom, start = off_start)
+        else :
+            off_start = mpos - 16_000_000
+            sequence, chromlen, _mpos, offset = get_sequence(fasta, chrom, start = off_start)
+            if chromlen < mpos :
+                raise ValueError("The mpos has to be in the chromosome. Exiting...")
+        
+        encoded_sequence = Genome.sequence_to_encoding(sequence)[None, :, :]
 
-    sequence = get_sequence(fasta, chrom, start = offset)
+    else :
+        chromlen = hg38.len_chrs[chrom]
+        if chromlen < mpos :
+                raise ValueError("The mpos has to be in the chromosome. Exiting...")
+        if mpos != -1 and mpos <= 16_000_000 :
+            _mpos = mpos
+            start = 0
+            encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+        else :
+            start = mpos - 16_000_000
+            if start and chromlen < start + 32_000_000 :
+                start = chromlen - 32_000_000
+                _mpos = mpos - start
+                encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+            else :
+                _mpos = mpos
+                encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
 
+
+        
     orca_predict.load_resources(models=['32M', '256M'], use_cuda=use_cuda)
-
-    mpos = set_mpos(mpos)
+    
+    _mpos = set_mpos(_mpos)
     midpoint = int(len(sequence) / 2)
     wpos = midpoint
-    encoded_sequence = Genome.sequence_to_encoding(sequence)[None, :, :]
+    
     outputs_ref = orca_predict.genomepredict(encoded_sequence, chrom,
-                                             mpos=mpos, wpos=wpos,
+                                             mpos=_mpos, wpos=wpos,
                                              use_cuda=use_cuda)
 
     
     output_pkl = "%s.pkl" % output_prefix
     file = open(output_pkl, 'wb')
     pickle.dump(outputs_ref, file)
-    chromlen = 158534110
     dump_target_matrix(outputs_ref, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen)
 
     model_labels = ["H1-ESC", "HFF"]
@@ -118,8 +233,6 @@ def parse_arguments():
                                      description=textwrap.dedent('''\
                                      Run glint alignment of query on subject region
                                      '''))
-    parser.add_argument('--fasta',
-                        required=True, help='fasta file')
     parser.add_argument('--chrom',
                         required=True, help='chrom name')
     parser.add_argument('--outprefix',
@@ -131,6 +244,8 @@ def parse_arguments():
                         required=False, help='The coordinate of the mutated bin.')
     parser.add_argument('--nocuda',
                         action="store_true", help='Switching to cpu (default: False)')
+    parser.add_argument('--fasta',
+                        required=False, help='fasta file. If None, "Homo_sapiens.GRCh38.dna.primary_assembly.fa" is used by default with hg38 in main.')
 
     args = parser.parse_args()
     return args
@@ -140,4 +255,4 @@ if __name__ == '__main__':
     args = parse_arguments()
 
     use_cuda = not args.nocuda
-    main(args.fasta, args.chrom, args.outprefix, args.mutation, args.mpos, use_cuda)
+    main(args.chrom, args.outprefix, args.mutation, args.mpos, args.fasta, use_cuda)

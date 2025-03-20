@@ -76,8 +76,9 @@ def read_cool_cooltools(filepath: str, chrom, start, end, resolution):
     """
     coolres = "%s::resolutions/%d" % (filepath, resolution)
     clr = cooler.Cooler(coolres)
-    _chrom = 'chr' + chrom
-    region = (_chrom, start, end)
+    if not chrom.startswith('chr'):
+        chrom = 'chr' + chrom
+    region = (chrom, start, end)
 
     mat_raw = clr.matrix(balance=False).fetch(region)
     mat_balanced = clr.matrix(balance=True).fetch(region)
