@@ -153,11 +153,19 @@ def create_OrcaMatrix(orcafile, cool_matrix) -> OrcaMatrix:
     orca_mat = read_orca_matrix(orcafile)
     return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix, orca_mat[3])
 
+def create_OrcaMatrix_compare(pred_ref, pred_mut) -> OrcaMatrix:
+    """
+    Create an OrcaMatrix object with two Orca predictions of the same region, one being the reference, the other for a mutated sequence.
+    """
+    ref = read_orca_matrix(pred_ref)
+    mut = read_orca_matrix(pred_mut)
+    return OrcaMatrix(ref[1], ref[2], mut[3], ref[3])
+
 
 def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile) -> OrcaMatrices:
     """
-    Function to create an OrcaMatrices object from 12 matrices paired by resolution (orca1 goes with cool1, orca referring to an predicted matix and cool to an observed matrix)
-    The resolution should be in decrescendo order (from 32Mb to 1Mb) for better readability (simply recommended and not necessary)
+    Function to create an OrcaMatrices object from 12 matrices paired by resolution (an orca predicted matix and a cool observed matrix).
+    The resolution should be in decrescendo order (from 32Mb to 1Mb) or cresendo order (from 1Mb to 32Mb) for better readability (simply recommended and not necessary).
     """
     orca_files = [orca_1, orca_2, orca_3, orca_4, orca_5, orca_6]
     cool_matrices = []
@@ -190,6 +198,32 @@ def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile
     
     return OrcaMatrices(di)
 
+def create_OrcaMatrices_compare(file_ref, file_mut) -> OrcaMatrices:
+    """
+    Function to create an OrcaMatrices object from 12 matrices paired by resolution (an orca predicted matix and a cool observed matrix).
+    It is expected that the datafiles of the different resolutions are in an eponym file (e.g. ./file_ref/file_ref_predictions_1Mb.txt)
+    The resolution should be in decrescendo order (from 32Mb to 1Mb) or cresendo order (from 1Mb to 32Mb) for better readability (simply recommended and not necessary).
+    """
+    pred_refs = ["%s/%s_predictions_%dMb.txt" % (file_ref, file_ref, i) for i in [1, 2, 4, 8, 16, 32]]
+    pred_muts = ["%s/%s_predictions_%dMb.txt" % (file_mut, file_mut, i) for i in [1, 2, 4, 8, 16, 32]]
+                
+    matrix1 = create_OrcaMatrix(pred_refs[0],pred_muts[0])
+    matrix2 = create_OrcaMatrix(pred_refs[1],pred_muts[1])
+    matrix3 = create_OrcaMatrix(pred_refs[2],pred_muts[2])
+    matrix4 = create_OrcaMatrix(pred_refs[3],pred_muts[3])
+    matrix5 = create_OrcaMatrix(pred_refs[4],pred_muts[4])
+    matrix6 = create_OrcaMatrix(pred_refs[5],pred_muts[5])
+
+    di={
+    "%s" %matrix1.resolution : matrix1,
+    "%s" %matrix2.resolution : matrix2,
+    "%s" %matrix3.resolution : matrix3,
+    "%s" %matrix4.resolution : matrix4,
+    "%s" %matrix5.resolution : matrix5,
+    "%s" %matrix6.resolution : matrix6
+    }
+    
+    return OrcaMatrices(di)
 
 
 def main(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile, output_scores, output_heatmaps, output_graphs):

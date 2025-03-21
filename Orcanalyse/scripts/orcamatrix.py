@@ -43,11 +43,12 @@ class OrcaMatrix ():
         the predicted matrix
     """
 
-    def __init__(self, region: list, resolution: str, observed_matrix: np.ndarray, predicted_matrix: np.ndarray):
+    def __init__(self, region: list, resolution: str, observed_matrix: np.ndarray, predicted_matrix: np.ndarray, mnames: list = [None, None]):
         self.region = region
         self.resolution = resolution
         self.observed_matrix = observed_matrix
         self.predicted_matrix = predicted_matrix
+        self.mnames = mnames
         # self.div_matrix = np.divide(observed_matrix, predicted_matrix)
     
     @property
@@ -60,23 +61,42 @@ class OrcaMatrix ():
     def get_matrices(self):
         return self.observed_matrix, self.predicted_matrix
     
-    def get_insulation_scores(self):
+    def get_insulation_scores(self, w: int = 5, mtype: str = "count"):
         """
         Function to compute the insulation scores, in a list, for the observed matrix and for the predicted matrix. They are stored in a list in this order.
+        Parameters :
+            - w : int
+                half the calculation window size (e.g. w=5 means that we use the 5 values before and after plus the bin value for each bin where it is possible)
         """
-        matrix_obs, matrix_pred = self.observed_matrix, self.predicted_matrix
-        n = len(matrix_pred)
-        w=5
-        scores=[[],[]]
-        scores[0], scores[1]=[0 for i in range(w)], [0 for i in range(w)]
-        for i in range(w, (n-w)):
-            score_obs=0
-            score_pred=0
-            for j in range(i-w, i+w+1):
-                score_obs+=matrix_obs[i][j]
-                score_pred+=matrix_pred[i][j]
-            scores[0].append(score_obs)
-            scores[1].append(score_pred)
+        if mtype == "count" :
+            matrix_obs, matrix_pred = self.observed_matrix, self.predicted_matrix
+            n = len(matrix_pred)
+            scores=[[],[]]
+            scores[0], scores[1]=[0 for i in range(w)], [0 for i in range(w)]
+            for i in range(w, (n-w)):
+                score_obs=0
+                score_pred=0
+                for j in range(i-w, i+w+1):
+                    score_obs+=matrix_obs[i][j]
+                    score_pred+=matrix_pred[i][j]
+                scores[0].append(score_obs)
+                scores[1].append(score_pred)
+        
+        elif mtype == "correl" :
+            correlation_obs, correlation_pred = np.corrcoef(self.observed_matrix), np.corrcoef(self.predicted_matrix)
+            n = len(matrix_pred)
+            scores=[[],[]]
+            scores[0], scores[1]=[0 for i in range(w)], [0 for i in range(w)]
+            for i in range(w, (n-w)):
+                score_obs=0
+                score_pred=0
+                for j in range(i-w, i+w+1):
+                    score_obs+=correlation_obs[i][j]
+                    score_pred+=correlation_pred[i][j]
+                scores[0].append(score_obs)
+                scores[1].append(score_pred)
+        else :
+            raise TypeError("%s is not a valid matrix type for the insulation score calculations. Choose between 'count' and 'correl' for count or correlation matrices.")
         return scores
     
     def get_PC1(self):
@@ -153,20 +173,21 @@ class OrcaMatrix ():
             plt.show()
     
 
-    def save_graphs(self, output_file: str = None, output_scores:str = None):
+    def save_graphs(self, output_file: str = None, output_scores:str = None, i_s_windowsize: int = 5, i_s_type: str = "count"):
         """
         Function to save in a pdf file the heatmap and the insulation scores as well as PC1 values, represented in two separated graphs, corresponding to the relevent OrcaMatrix 
         Plus it saves the scores (Insulation and PC1) in a text file (csv recommended)
         """
+
         output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
         with open(output_scores_path, 'w') as f:
-            insulation_scores_observed = self.get_insulation_scores()[0]
+            insulation_scores_observed = self.get_insulation_scores(i_s_windowsize, i_s_type)[0]
             insulation_scores_observed_str = '\t'.join(str(score) for score in insulation_scores_observed)
             f.write("Insulation scores_observed" + '\t' + insulation_scores_observed_str + '\n')
             PC1_observed = self.get_PC1()[0]
             PC1_observed_str = '\t'.join(str(score) for score in PC1_observed)
             f.write("PC1_observeded" + '\t' + PC1_observed_str + '\n')
-            insulation_scores_predicted = self.get_insulation_scores()[1]
+            insulation_scores_predicted = self.get_insulation_scores(i_s_windowsize, i_s_type)[1]
             insulation_scores_predicted_str = '\t'.join(str(score) for score in insulation_scores_predicted)
             f.write("Insulation scores_predicted" + '\t' + insulation_scores_predicted_str + '\n')
             PC1_predicted = self.get_PC1()[1]
@@ -179,7 +200,6 @@ class OrcaMatrix ():
         formatted_position_values = ['%sb' %bp_formatter.format_eng(value) for value in position_values]
         titles = [self.references[0],self.references[1],self.references[2],self.references[3]]
         cmap=hnh_cmap_ext5
-
 
         with PdfPages(output_file, keep_empty=False) as pdf:
             # Create a GridSpec with 4 rows and 2 columns
@@ -201,7 +221,7 @@ class OrcaMatrix ():
             # Insulation scores_obs
             ax_insulation_obs = f.add_subplot(gs[1, 0])
             ax_insulation_obs.set_xlim(0, 250)
-            ax_insulation_obs.plot(self.get_insulation_scores()[0], color='blue')
+            ax_insulation_obs.plot(insulation_scores_observed, color='blue')
             ax_insulation_obs.set_ylabel('Insulation Scores')
             ax_insulation_obs.set_xticks([0,50,100,150,200,250])
             ax_insulation_obs.set_xticklabels(formatted_position_values)
@@ -209,7 +229,7 @@ class OrcaMatrix ():
             # PC1 values
             ax_pc1_obs = f.add_subplot(gs[2, 0])
             ax_pc1_obs.set_xlim(0, 250)
-            ax_pc1_obs.plot(self.get_PC1()[0], color='green')
+            ax_pc1_obs.plot(PC1_observed, color='green')
             ax_pc1_obs.set_ylabel('PC1 Values')
             ax_pc1_obs.set_xticks([0,50,100,150,200,250])
             ax_pc1_obs.set_xticklabels(formatted_position_values)
@@ -227,7 +247,7 @@ class OrcaMatrix ():
             # Insulation scores_pred
             ax_insulation_pred = f.add_subplot(gs[4, 0])
             ax_insulation_pred.set_xlim(0, 250)
-            ax_insulation_pred.plot(self.get_insulation_scores()[1], color='blue')
+            ax_insulation_pred.plot(insulation_scores_predicted, color='blue')
             ax_insulation_pred.set_ylabel('Insulation Scores')
             ax_insulation_pred.set_xticks([0,50,100,150,200,250])
             ax_insulation_pred.set_xticklabels(formatted_position_values)
@@ -235,7 +255,7 @@ class OrcaMatrix ():
             # PC1 values
             ax_pc1_pred = f.add_subplot(gs[5, 0])
             ax_pc1_pred.set_xlim(0, 250)
-            ax_pc1_pred.plot(self.get_PC1()[1], color='green')
+            ax_pc1_pred.plot(PC1_predicted, color='green')
             ax_pc1_pred.set_ylabel('PC1 Values')
             ax_pc1_pred.set_xticks([0,50,100,150,200,250])
             ax_pc1_pred.set_xticklabels(formatted_position_values)

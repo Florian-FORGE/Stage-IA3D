@@ -165,7 +165,10 @@ def reverse_obs_over_exp_matrix(matrix: np.ndarray,exp_matrix: np.ndarray):
         print("error : the matrices do not have the same length")
 
 
-def create_OrcaMatrix(orcafile, coolfile) -> OrcaMatrix:
+def create_OrcaMatrix_cool(orcafile, coolfile) -> OrcaMatrix:
+    """
+    Create an OrcaMatrix object with an Orca prediction (from which the metadata are extracted) and the corresponding data from a .mcool file.
+    """
     orca_mat = read_orca_matrix(orcafile)
     chrom = orca_mat[1][0]
     start = orca_mat[1][1]
@@ -175,9 +178,17 @@ def create_OrcaMatrix(orcafile, coolfile) -> OrcaMatrix:
     cool_matrix = read_cool_cooltools(coolfile, chrom, start, end, resolution)
     return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix, orca_mat[3])
 
+def create_OrcaMatrix_compare(pred_ref, pred_mut) -> OrcaMatrix:
+    """
+    Create an OrcaMatrix object with two Orca predictions of the same region, one being the reference, the other for a mutated sequence.
+    """
+    ref = read_orca_matrix(pred_ref)
+    mut = read_orca_matrix(pred_mut)
+    return OrcaMatrix(ref[1], ref[2], mut[3], ref[3])
+
 
 def main(orcafile, coolfile, output_scores, output_heatmap, output_graphs):
-    orca_matrix = create_OrcaMatrix(orcafile,coolfile)
+    orca_matrix = create_OrcaMatrix_cool(orcafile,coolfile)
     
     output_heatmap_path = os.path.join("Orcanalyse/Outputs", output_heatmap)
     orca_matrix.heatmaps(output_heatmap_path)

@@ -11,6 +11,8 @@ sys.path.append("/home/fforge/orca")
 import orca_predict
 from orca_utils import genomeplot
 from selene_sdk.sequences import Genome
+from selene_utils2 import MemmapGenome
+import pathlib
 # import torch
 
 import logging
@@ -20,8 +22,11 @@ logging.basicConfig(
 )
 
 """
-Functions adapted from Cytogene3D using Orca ressources to predict the Hi-C observed over expected matrices
+Functions adapted from IA3D using Orca ressources to predict the Hi-C observed over expected matrices
 at different resolutions from a sequence (Fasta format)
+Ressources from :
+    - Orca github site  https://github.com/jzhoulab/orca
+    - Cytogene3D github site https://github.com/Cytogene3D/IA3D
 
 """
 
@@ -66,7 +71,7 @@ def get_sequence(fasta, chrom, start: int = None, end: int = None):
         end = 32_000_000
         logging.warning("End position has been adjusted to ensure the sequence is 32Mb long")
     
-    # Check that the sequence is a 32Mb sequence and extract it
+    # Check that the sequence is a 32Mb sequence and extract it or raise ValueError
     if start and end and (end - start) != 32_000_000:
         raise ValueError("The FASTA sequence must be exactly 32Mb in size.")
     elif start and end and (end - start) == 32_000_000 :
@@ -74,10 +79,13 @@ def get_sequence(fasta, chrom, start: int = None, end: int = None):
     elif start and (chromlen - start) >= 32_000_000 :
       sequence = str(genome[chrom][start : start + 32_000_000])
       logging.info("Missing end argument and sequence too long, sequence has been restrained to a 32Mb length from start")
+    elif start == 0 and chromlen >= 32_000_000 :
+      sequence = str(genome[chrom][start : start + 32_000_000])
+      logging.info("Missing end argument and sequence too long, sequence has been restrained to a 32Mb length from start")
     elif end and end >= 32_000_000 :
       sequence = str(genome[chrom][end - 32_000_000 : end])
       logging.info("Missing start argument and sequence too long, sequence has been restrained to a 32Mb length ending at end")
-    elif len(sequence) != 32_000_000:
+    elif chromlen != 32_000_000:
         raise ValueError("The FASTA sequence must be exactly 32Mb in size.")
     else :
         start = 0
@@ -135,14 +143,38 @@ def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chr
                   (resol, mpos, wpos, chrom, start + offset, end + offset, end-start, chromlen, mutation))
         np.savetxt(output, pred, delimiter='\t', header=header, comments='')
 
-    outputlog = "%s.log" % output_prefix
+    outputlog = "%s/%s.log" % (output_prefix, output_prefix)
     with open(outputlog, "w") as fout:
         fout.write("# Coordinates of the different matrix in descending order\n")
         for resol, start, end in zip(resolutions, starts, ends):
             fout.write("%s\t%s\t%d\t%d\n" % (resol, chrom, start + offset, end + offset))
 
+def get_genome_orca(fasta, use_memmapgenome):
+    if use_memmapgenome and pathlib.Path("%s.mmap" % fasta).exists() :
+        giv_g = MemmapGenome(input_path = "%s" % fasta, memmapfile= "%s.mmap" % fasta)
+    else:
+        giv_g = Genome(input_path = "%s" % fasta)
+    return giv_g
 
-def main(chrom, output_prefix, mutation, mpos=-1, fasta=None, use_cuda=True):
+def get_encoded_sequence_main (mpos, fasta, chrom):
+    """
+    Personnal version of the function to check the acceptability of the mpos, and get the encoded sequence,
+    the coordinate to zoom into _mpos, and the offset of the start position.
+    """
+    if mpos != -1 and mpos <= 16_000_000 :
+            _mpos = mpos
+            sequence, chromlen, _, offset = get_sequence(fasta, chrom, start = 0)
+    else :
+        off_start = mpos - 16_000_000
+        sequence, chromlen, _mpos, offset = get_sequence(fasta, chrom, start = off_start)
+        if chromlen < mpos :
+            raise ValueError("The mpos has to be in the chromosome. Exiting...")
+    
+    encoded_sequence = Genome.sequence_to_encoding(sequence)[None, :, :]
+    return encoded_sequence, _mpos, offset
+
+
+def main(chrom, output_prefix, mutation, mpos = -1, fasta = None, use_cuda: bool = True, use_memmapgenome = True):
     """
     Run the Orca prediction pipeline to generate Hi-C matrices from a genomic sequence.
 
@@ -168,43 +200,53 @@ def main(chrom, output_prefix, mutation, mpos=-1, fasta=None, use_cuda=True):
     """
     # if use_cuda and not torch.cuda.is_available():
     #     raise RuntimeError("CUDA is not available on this system.")
-    if fasta :
-        if mpos != -1 and mpos <= 16_000_000 :
-            _mpos = mpos
-            off_start = 0
-            sequence, chromlen, _, offset = get_sequence(fasta, chrom, start = off_start)
-        else :
-            off_start = mpos - 16_000_000
-            sequence, chromlen, _mpos, offset = get_sequence(fasta, chrom, start = off_start)
-            if chromlen < mpos :
-                raise ValueError("The mpos has to be in the chromosome. Exiting...")
-        
-        encoded_sequence = Genome.sequence_to_encoding(sequence)[None, :, :]
 
-    else :
-        chromlen = hg38.len_chrs[chrom]
+    if fasta :
+        giv_g = get_genome_orca(fasta, use_memmapgenome)
+        giv_g.get_chr_lens()
+        chromlen = giv_g.len_chrs[chrom]
         if chromlen < mpos :
-                raise ValueError("The mpos has to be in the chromosome. Exiting...")
+            raise ValueError("The mpos has to be in the chromosome. Exiting...")
         if mpos != -1 and mpos <= 16_000_000 :
             _mpos = mpos
             start = 0
-            encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+            offset = start
         else :
             start = mpos - 16_000_000
+            offset = start
             if start and chromlen < start + 32_000_000 :
                 start = chromlen - 32_000_000
+                offset = start
                 _mpos = mpos - start
-                encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
             else :
                 _mpos = mpos
-                encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+        encoded_sequence = giv_g.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+        orca_predict.load_resources(models=['32M', '256M'], use_cuda=use_cuda)
 
+    else :
+        orca_predict.load_resources(models=['32M', '256M'], use_cuda=use_cuda)
+        chromlen = orca_predict.hg38.len_chrs[chrom]
+        if chromlen < mpos :
+            raise ValueError("The mpos has to be in the chromosome. Exiting...")
+        if mpos != -1 and mpos <= 16_000_000 :
+            _mpos = mpos
+            start = 0
+            offset = start
+        else :
+            start = mpos - 16_000_000
+            offset = start
+            if start and chromlen < start + 32_000_000 :
+                start = chromlen - 32_000_000
+                offset = start
+                _mpos = mpos - start
+            else :
+                _mpos = mpos
+        
+        encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
 
         
-    orca_predict.load_resources(models=['32M', '256M'], use_cuda=use_cuda)
-    
     _mpos = set_mpos(_mpos)
-    midpoint = int(len(sequence) / 2)
+    midpoint = 16_000_000
     wpos = midpoint
     
     outputs_ref = orca_predict.genomepredict(encoded_sequence, chrom,
@@ -218,13 +260,14 @@ def main(chrom, output_prefix, mutation, mpos=-1, fasta=None, use_cuda=True):
     dump_target_matrix(outputs_ref, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen)
 
     model_labels = ["H1-ESC", "HFF"]
+    output_prefix_file = "%s/%s" % (output_prefix, output_prefix)
     genomeplot(
         outputs_ref,
         show_genes=False,
         show_tracks=False,
         show_coordinates=True,
         model_labels=model_labels,
-        file=output_prefix + ".pdf",
+        file=output_prefix_file + ".pdf",
         )
 
 
