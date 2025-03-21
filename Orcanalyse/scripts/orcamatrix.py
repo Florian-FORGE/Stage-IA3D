@@ -24,7 +24,7 @@ The rest of the file should contain the matrix itself
 
 class OrcaMatrix ():
     """
-    Class associated to a particular associatopn --observed matrix, predicted matrix--
+    Class associated to a particular association --observed matrix, predicted matrix--
 
     For a given region, resolution and matrix, it will provide through methodes the following:
     - The insulation score
@@ -186,7 +186,7 @@ class OrcaMatrix ():
             f.write("Insulation scores_observed" + '\t' + insulation_scores_observed_str + '\n')
             PC1_observed = self.get_PC1()[0]
             PC1_observed_str = '\t'.join(str(score) for score in PC1_observed)
-            f.write("PC1_observeded" + '\t' + PC1_observed_str + '\n')
+            f.write("PC1_observed" + '\t' + PC1_observed_str + '\n')
             insulation_scores_predicted = self.get_insulation_scores(i_s_windowsize, i_s_type)[1]
             insulation_scores_predicted_str = '\t'.join(str(score) for score in insulation_scores_predicted)
             f.write("Insulation scores_predicted" + '\t' + insulation_scores_predicted_str + '\n')
@@ -202,7 +202,7 @@ class OrcaMatrix ():
         cmap=hnh_cmap_ext5
 
         with PdfPages(output_file, keep_empty=False) as pdf:
-            # Create a GridSpec with 4 rows and 2 columns
+            # Create a GridSpec with 6 rows and 1 column
             gs = GridSpec(nrows=6, ncols=1, height_ratios=[4, 0.25, 0.25, 4, 0.25, 0.25])
             
             # Create the figure
