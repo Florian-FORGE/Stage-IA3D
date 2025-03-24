@@ -68,48 +68,31 @@ class Orca_wt_mut ():
         Parameters :
             - w : int
                 half the calculation window size (e.g. w=5 means that we use the 5 values before and after plus the bin value for each bin where it is possible)
+            - mtype : str
+                the matrix type from which the insulation score should be calculated. It has to be one of the following ["count", "correl", "div"]
         """
         if mtype == "count" :
-            matrix_wt, matrix_mut = self.wt_matrix, self.mut_matrix
-            n = len(matrix_mut)
-            scores=[[],[]]
-            scores[0], scores[1]=[0 for i in range(w)], [0 for i in range(w)]
-            for i in range(w, (n-w)):
-                score_wt=0
-                score_mut=0
-                for j in range(i-w, i+w+1):
-                    score_wt+=matrix_wt[i][j]
-                    score_mut+=matrix_mut[i][j]
-                scores[0].append(score_wt)
-                scores[1].append(score_mut)
-        
+            m_wt, m_mut = self.wt_matrix, self.mut_matrix
         elif mtype == "correl" :
-            correlation_wt, correlation_mut = np.corrcoef(self.wt_matrix), np.corrcoef(self.mut_matrix)
-            n = len(matrix_mut)
-            scores=[[],[]]
-            scores[0], scores[1]=[0 for i in range(w)], [0 for i in range(w)]
-            for i in range(w, (n-w)):
-                score_wt=0
-                score_mut=0
-                for j in range(i-w, i+w+1):
-                    score_wt+=correlation_wt[i][j]
-                    score_mut+=correlation_mut[i][j]
-                scores[0].append(score_wt)
-                scores[1].append(score_mut)
-        
+            m_wt, m_mut = np.corrcoef(self.wt_matrix), np.corrcoef(self.mut_matrix)
         elif mtype == "div" :
-            div_mut_wt = self.div_matrix
-            n = len(div_mut_wt)
-            scores=[]
-            for i in range(w, (n-w)):
-                score = 0
-                for j in range(i-w, i+w+1):
-                    score += div_mut_wt[i][j]
-                scores.append(score)
-                
+            m_wt, m_mut  = self.div_matrix, np.zeros_like(self.wt_matrix)
         else :
             pass
             raise TypeError("%s is not a valid matrix type for the insulation score calculations. Choose between 'count' and 'correl' for count or correlation matrices.")
+        
+        n = len(m_mut)
+        scores=[[],[]]
+        scores[0], scores[1]=[0 for i in range(w)], [0 for i in range(w)]
+        for i in range(w, (n-w)):
+            score_wt=0
+            score_mut=0
+            for j in range(i-w, i+w+1):
+                score_wt+=m_wt[i][j]
+                score_mut+=m_mut[i][j]
+            scores[0].append(score_wt)
+            scores[1].append(score_mut)
+         
         return scores
     
     def get_PC1(self):
@@ -154,152 +137,168 @@ class Orca_wt_mut ():
         return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
 
 
-    def heatmaps(self, output_file: str = None):
+    def formatting(self):
         bp_formatter = EngFormatter('b', places=1)
         position_values = [self.get_corresponding_position(0)[0]] + [self.get_corresponding_position(i)[0] for i in range(49,250,50)]
-        formatted_position_values = ['%sb' %bp_formatter.format_eng(value) for value in position_values]
+        f_p_val = ['%sb' %bp_formatter.format_eng(value) for value in position_values]
         titles = [self.references[0],self.references[1],self.references[2],self.references[3]]
         cmap=hnh_cmap_ext5
+        return f_p_val, titles, cmap
+
+    def heatmaps(self, output_file: str = None):
+        formatted_position_values, titles, cmap = self.formatting()
         
         gs = GridSpec(nrows=2, ncols=1)
         f = plt.figure(clear=True, figsize=(10, 20))
+        
         ax_heatmap_wt = f.add_subplot(gs[0, 0])
-        ax_heatmap_wt.imshow(self.wt_matrix, cmap=cmap, interpolation='nearest', aspect='auto', vmin=-0.2, vmax=3)
-        ax_heatmap_wt.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
-        ax_heatmap_wt.set_yticks([0, 50, 100, 150, 200, 250])
-        ax_heatmap_wt.set_yticklabels(formatted_position_values)
-        ax_heatmap_wt.set_xticks([0, 50, 100, 150, 200, 250])
-        ax_heatmap_wt.set_xticklabels(formatted_position_values)
-        format_ticks(ax_heatmap_wt, x=False, y=False)
+        heatmap(ax_heatmap_wt, self.wt_matrix, cmap, titles, formatted_position_values)
+                
         ax_heatmap_mut = f.add_subplot(gs[1, 0])
-        ax_heatmap_mut.imshow(self.mut_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
-        ax_heatmap_mut.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
-        ax_heatmap_mut.set_yticks([0, 50, 100, 150, 200, 250])
-        ax_heatmap_mut.set_yticklabels(formatted_position_values)
-        ax_heatmap_mut.set_xticks([0, 50, 100, 150, 200, 250])
-        ax_heatmap_mut.set_xticklabels(formatted_position_values)
-        format_ticks(ax_heatmap_mut, x=False, y=False)
+        heatmap(ax_heatmap_mut, self.mut_matrix, cmap, titles, formatted_position_values)
         
         if output_file: 
             plt.savefig(output_file, transparent=True)
         else:
             plt.show()
     
+    def save_scores(self, output_scores:str = None, i_s_windowsize: int = 5, i_s_types: list = ["count"]):
+        output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
+        if i_s_types :
+            di = {}
+            for value in i_s_types :
+                di["%s" % value] = self.get_insulation_scores(i_s_windowsize, mtype=value)
+        else :
+            di = {"count":self.get_insulation_scores(i_s_windowsize)}
+        
+        PC1_wt, PC1_mut = self.get_PC1()
+        di["PC1":[PC1_wt, PC1_mut]]
 
-    def save_graphs(self, output_file: str = None, output_scores:str = None, i_s_windowsize: int = 5, i_s_type: str = "count"):
+        with open(output_scores_path, 'w') as f:
+            for key, value in di :
+                if key == "div" :
+                    i_s = value[0]
+                    i_s_str = '\t'.join(str(score) for score in i_s)
+                    f.write("%s" % key + '\t' + i_s_str + '\n')
+                else :
+                    i_s_wt = value[0]
+                    i_s_wt_str = '\t'.join(str(score) for score in i_s_wt)
+                    f.write("%s_wt" % key + '\t' + i_s_wt_str + '\n')
+                    i_s_mut = value[1]
+                    i_s_mut_str = '\t'.join(str(score) for score in i_s_mut)
+                    f.write("%s_mut" % key + '\t' + i_s_mut_str + '\n')
+
+        return PC1_wt, PC1_mut
+
+    def save_graphs(self, output_file: str, output_scores:str, i_s_windowsize: int = 5, i_s_types: list = ["count"]):
         """
         Function to save in a pdf file the heatmap and the insulation scores as well as PC1 values, represented in two separated graphs, corresponding to the relevent OrcaMatrix 
         Plus it saves the scores (Insulation and PC1) in a text file (csv recommended)
         """
 
-        output_scores_path = os.path.join("Orcanalyse/Outputs", output_scores)
-        with open(output_scores_path, 'w') as f:
-            insulation_scores_wt = self.get_insulation_scores(i_s_windowsize, i_s_type)[0]
-            insulation_scores_wt_str = '\t'.join(str(score) for score in insulation_scores_wt)
-            f.write("Insulation scores_wt" + '\t' + insulation_scores_wt_str + '\n')
-            PC1_wt = self.get_PC1()[0]
-            PC1_wt_str = '\t'.join(str(score) for score in PC1_wt)
-            f.write("PC1_wt" + '\t' + PC1_wt_str + '\n')
-            insulation_scores_mut = self.get_insulation_scores(i_s_windowsize, i_s_type)[1]
-            insulation_scores_mut_str = '\t'.join(str(score) for score in insulation_scores_mut)
-            f.write("Insulation scores_mut" + '\t' + insulation_scores_mut_str + '\n')
-            PC1_mut = self.get_PC1()[1]
-            PC1_mut_str = '\t'.join(str(score) for score in PC1_mut)
-            f.write("PC1_mut" + '\t' + PC1_mut_str + '\n')
+        PC1_wt, PC1_mut = self.save_scores(output_scores, i_s_windowsize, i_s_types)
 
-
-        bp_formatter = EngFormatter('b', places=1)
-        position_values = [self.get_corresponding_position(0)[0]] + [self.get_corresponding_position(i)[0] for i in range(49,250,50)]
-        formatted_position_values = ['%sb' %bp_formatter.format_eng(value) for value in position_values]
-        titles = [self.references[0],self.references[1],self.references[2],self.references[3]]
-        cmap=hnh_cmap_ext5
+        formatted_position_values, titles, cmap = self.formatting()
 
         with PdfPages(output_file, keep_empty=False) as pdf:
             # Create a GridSpec with 6 rows and 1 column
-            gs = GridSpec(nrows=6, ncols=1, height_ratios=[4, 0.25, 0.25, 4, 0.25, 0.25])
+            nb_i_s = len(i_s_types)
+            nb_graphs = 4 + 2 * nb_i_s
+            gs = GridSpec(nrows=nb_graphs, ncols=1, height_ratios=[4, 0.25, 0.25, 4, 0.25, 0.25])
             
             # Create the figure
             f = plt.figure(clear=True, figsize=(20, 44))
             
             # Heatmap_wt
             ax_heatmap_wt = f.add_subplot(gs[0, 0])
-            ax_heatmap_wt.imshow(self.wt_matrix, cmap=cmap, interpolation='nearest', aspect='auto', vmin=-0.2, vmax=3)
-            format_ticks(ax_heatmap_wt, x=True, y=True)
-            ax_heatmap_wt.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
-            ax_heatmap_wt.set_yticks([0,50,100,150,200,250])
-            ax_heatmap_wt.set_yticklabels(formatted_position_values)
-            ax_heatmap_wt.set_xticks([0,50,100,150,200,250])
-            ax_heatmap_wt.set_xticklabels(formatted_position_values)
-                       
+            heatmap(ax_heatmap_wt, self.wt_matrix, cmap, titles, formatted_position_values)
+                                   
             # Insulation scores_wt
-            ax_insulation_wt = f.add_subplot(gs[1, 0])
-            ax_insulation_wt.set_xlim(0, 250)
-            ax_insulation_wt.plot(insulation_scores_wt, color='blue')
-            ax_insulation_wt.set_ylabel('Insulation Scores')
-            ax_insulation_wt.set_xticks([0,50,100,150,200,250])
-            ax_insulation_wt.set_xticklabels(formatted_position_values)
+            for i in range(nb_i_s) :
+                ax_i_s_wt = f.add_subplot(gs[1 + i, 0])
+                i_s = self.get_insulation_scores(mtype = i_s_types[i])[0]
+                i_s_plot(ax_i_s_wt, i_s, formatted_position_values)
             
             # PC1 values
             ax_pc1_wt = f.add_subplot(gs[2, 0])
-            ax_pc1_wt.set_xlim(0, 250)
-            ax_pc1_wt.plot(PC1_wt, color='green')
-            ax_pc1_wt.set_ylabel('PC1 Values')
-            ax_pc1_wt.set_xticks([0,50,100,150,200,250])
-            ax_pc1_wt.set_xticklabels(formatted_position_values)
+            PC1_plot(ax_pc1_wt, PC1_wt, formatted_position_values)
 
             # Heatmap_mut
             ax_heatmap_mut = f.add_subplot(gs[3, 0])
-            ax_heatmap_mut.imshow(self.mut_matrix, cmap=cmap, interpolation='nearest', aspect='auto')
-            format_ticks(ax_heatmap_mut, x=True, y=True)
-            ax_heatmap_mut.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
-            ax_heatmap_mut.set_yticks([0,50,100,150,200,250])
-            ax_heatmap_mut.set_yticklabels(formatted_position_values)
-            ax_heatmap_mut.set_xticks([0,50,100,150,200,250])
-            ax_heatmap_mut.set_xticklabels(formatted_position_values)
+            heatmap(ax_heatmap_mut, self.mut_matrix, cmap, titles, formatted_position_values)
             
             # Insulation scores_mut
-            ax_insulation_mut = f.add_subplot(gs[4, 0])
-            ax_insulation_mut.set_xlim(0, 250)
-            ax_insulation_mut.plot(insulation_scores_mut, color='blue')
-            ax_insulation_mut.set_ylabel('Insulation Scores')
-            ax_insulation_mut.set_xticks([0,50,100,150,200,250])
-            ax_insulation_mut.set_xticklabels(formatted_position_values)
+            for i in range(nb_i_s) :
+                ax_i_s_mut = f.add_subplot(gs[3 + nb_i_s + i, 0])
+                i_s = self.get_insulation_scores(mtype = i_s_types[i])[1]
+                i_s_plot(ax_i_s_mut, i_s, formatted_position_values)
 
             # PC1 values
             ax_pc1_mut = f.add_subplot(gs[5, 0])
-            ax_pc1_mut.set_xlim(0, 250)
-            ax_pc1_mut.plot(PC1_mut, color='green')
-            ax_pc1_mut.set_ylabel('PC1 Values')
-            ax_pc1_mut.set_xticks([0,50,100,150,200,250])
-            ax_pc1_mut.set_xticklabels(formatted_position_values)
+            PC1_plot(ax_pc1_mut, PC1_mut, formatted_position_values)
             
             # Save the figure to the PDF
             pdf.savefig(f)
             plt.close(f)
         pdf.close()
 
-    def compare_scores(self, i_s_type: list = None):
+    def compare_scores(self, output_file: str, i_s_types: list = None):
         """
         Function to compare the different scores obtained through insulation scores or PCA between the wildtype and mutated variant, 
         and compare the interpratability of the sores themselves.
         """
-        if i_s_type :
+        f_p_val, _, _= self.formatting()
+        output_file_path = os.path.join("Orcanalyse/Outputs", output_file)
+        
+        if i_s_types :
             di = {}
-            for value in i_s_type :
-                di["%s" % value] = self.get_insulation_scores(mtype=i_s_type)
+            for value in i_s_types :
+                di["%s" % value] = self.get_insulation_scores(mtype=value)
         else :
             di = {"count":self.get_insulation_scores()}
+        
         di["PC1":self.get_PC1()]
+                    
+        with PdfPages("%s.pdf" % output_file_path, keep_empty=False) as pdf, open(output_file_path, 'w') as fi :
+            
+            gs = GridSpec(nrows=2, ncols=len(di))
+                        
+            f = plt.figure(clear=True, figsize=(20, 44))
 
-        # for key, value in di :
-        #     if key == "div" :
-        #         ####nothing much to do but not sure about the output type for now
-        #         print(value)
-        #     else :
-        #         value_wt = np.array(value[0])
-        #         value_mut = np.aray(value[1])
-        #         sub = np.subtract(value_mut, value_wt)
-        #still working on this
+            i=1
+            for key, value in di :
+                if key == "div" :
+                    ax = f.add_subplot(gs[0, 0])
+                    i_s_plot(ax, value[0], f_p_val)
+                    i_s_str = '\t'.join(str(score) for score in value[0])
+                    fi.write("%s" % key + '\t' + i_s_str + '\n')
+                elif key == "PC1" :
+                    ax = f.add_subplot(gs[0, i])
+                    PC1_plot(ax, value[0], f_p_val)
+                    i_s_wt_str = '\t'.join(str(score) for score in value[0])
+                    fi.write("%s_wt" % key + '\t' + i_s_wt_str + '\n')
+                    ax = f.add_subplot(gs[1, i])
+                    PC1_plot(ax, value[1], f_p_val)
+                    i_s_mut_str = '\t'.join(str(score) for score in value[1])
+                    fi.write("%s_mut" % key + '\t' + i_s_mut_str + '\n')
+                    i+=1
+                else :
+                    ax = f.add_subplot(gs[0, i])
+                    i_s_plot(ax, value[0], f_p_val)
+                    i_s_wt_str = '\t'.join(str(score) for score in value[0])
+                    fi.write("%s_wt" % key + '\t' + i_s_wt_str + '\n')
+                    ax = f.add_subplot(gs[1, i])
+                    i_s_plot(ax, value[1], f_p_val)
+                    i_s_mut_str = '\t'.join(str(score) for score in value[1])
+                    fi.write("%s_mut" % key + '\t' + i_s_mut_str + '\n')
+                    i+=1
+            
+            pdf.savefig(f)
+            plt.close(f)
+        pdf.close()
+        f.close()
+                    
+                    
 
 
 
@@ -317,3 +316,27 @@ def format_ticks(ax, x=True, y=True, rotate=True):
         ax.xaxis.tick_bottom()
     if rotate:
         ax.tick_params(axis='x',rotation=45)
+
+
+def i_s_plot(ax, i_s, f_p_val):
+    ax.set_xlim(0, 250)
+    ax.plot(i_s, color='blue')
+    ax.set_ylabel('Insulation Scores')
+    ax.set_xticks([0,50,100,150,200,250])
+    ax.set_xticklabels(f_p_val)
+
+def PC1_plot(ax, PC1, f_p_val):
+    ax.set_xlim(0, 250)
+    ax.plot(PC1, color='green')
+    ax.set_ylabel('PC1 Values')
+    ax.set_xticks([0,50,100,150,200,250])
+    ax.set_xticklabels(f_p_val)
+
+def heatmap(ax, matrix, cmap, titles, f_p_val):
+    ax.imshow(matrix, cmap=cmap, interpolation='nearest', aspect='auto', vmin=-0.2, vmax=3)
+    ax.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
+    ax.set_yticks([0, 50, 100, 150, 200, 250])
+    ax.set_yticklabels(f_p_val)
+    ax.set_xticks([0, 50, 100, 150, 200, 250])
+    ax.set_xticklabels(f_p_val)
+    format_ticks(ax, x=False, y=False)
