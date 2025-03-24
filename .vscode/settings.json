@@ -1,7 +1,0 @@
-{
-    "python.analysis.extraPaths": [
-        "./orca",
-        "./orca/selene",
-        "./Orcanalyse/scripts"
-    ]
-}
