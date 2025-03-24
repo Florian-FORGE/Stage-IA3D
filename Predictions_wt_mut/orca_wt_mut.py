@@ -172,10 +172,10 @@ class Orca_wt_mut ():
             di = {"count":self.get_insulation_scores(i_s_windowsize)}
         
         PC1_wt, PC1_mut = self.get_PC1()
-        di["PC1":[PC1_wt, PC1_mut]]
+        di["PC1"] = [PC1_wt, PC1_mut]
 
         with open(output_scores_path, 'w') as f:
-            for key, value in di :
+            for key, value in di.items() :
                 if key == "div" :
                     i_s = value[0]
                     i_s_str = '\t'.join(str(score) for score in i_s)
@@ -242,7 +242,7 @@ class Orca_wt_mut ():
             plt.close(f)
         pdf.close()
 
-    def compare_scores(self, output_file: str, i_s_types: list = None):
+    def compare_scores_plot(self, output_file: str, i_s_types: list = None):
         """
         Function to compare the different scores obtained through insulation scores or PCA between the wildtype and mutated variant, 
         and compare the interpratability of the sores themselves.
@@ -257,7 +257,7 @@ class Orca_wt_mut ():
         else :
             di = {"count":self.get_insulation_scores()}
         
-        di["PC1":self.get_PC1()]
+        di["PC1"] = self.get_PC1()
                     
         with PdfPages("%s.pdf" % output_file_path, keep_empty=False) as pdf, open(output_file_path, 'w') as fi :
             
@@ -266,10 +266,10 @@ class Orca_wt_mut ():
             f = plt.figure(clear=True, figsize=(20, 44))
 
             i=1
-            for key, value in di :
+            for key, value in di.items() :
                 if key == "div" :
                     ax = f.add_subplot(gs[0, 0])
-                    i_s_plot(ax, value[0], f_p_val)
+                    i_s_plot(ax, value[0], f_p_val, title = "IS_div_mut_wt")
                     i_s_str = '\t'.join(str(score) for score in value[0])
                     fi.write("%s" % key + '\t' + i_s_str + '\n')
                 elif key == "PC1" :
@@ -284,11 +284,11 @@ class Orca_wt_mut ():
                     i+=1
                 else :
                     ax = f.add_subplot(gs[0, i])
-                    i_s_plot(ax, value[0], f_p_val)
+                    i_s_plot(ax, value[0], f_p_val, title = "IS_%s_wt" %key)
                     i_s_wt_str = '\t'.join(str(score) for score in value[0])
                     fi.write("%s_wt" % key + '\t' + i_s_wt_str + '\n')
                     ax = f.add_subplot(gs[1, i])
-                    i_s_plot(ax, value[1], f_p_val)
+                    i_s_plot(ax, value[1], f_p_val, title = "IS_%s_mut" %key)
                     i_s_mut_str = '\t'.join(str(score) for score in value[1])
                     fi.write("%s_mut" % key + '\t' + i_s_mut_str + '\n')
                     i+=1
@@ -298,7 +298,7 @@ class Orca_wt_mut ():
         pdf.close()
         f.close()
                     
-                    
+
 
 
 
@@ -318,22 +318,24 @@ def format_ticks(ax, x=True, y=True, rotate=True):
         ax.tick_params(axis='x',rotation=45)
 
 
-def i_s_plot(ax, i_s, f_p_val):
+def i_s_plot(ax, i_s, f_p_val: list, title: str =None):
     ax.set_xlim(0, 250)
     ax.plot(i_s, color='blue')
     ax.set_ylabel('Insulation Scores')
     ax.set_xticks([0,50,100,150,200,250])
     ax.set_xticklabels(f_p_val)
+    ax.set_title("%s" % title)
 
-def PC1_plot(ax, PC1, f_p_val):
+def PC1_plot(ax, PC1, f_p_val: list, title: str =None):
     ax.set_xlim(0, 250)
     ax.plot(PC1, color='green')
     ax.set_ylabel('PC1 Values')
     ax.set_xticks([0,50,100,150,200,250])
     ax.set_xticklabels(f_p_val)
+    ax.set_title("%s" % title)
 
-def heatmap(ax, matrix, cmap, titles, f_p_val):
-    ax.imshow(matrix, cmap=cmap, interpolation='nearest', aspect='auto', vmin=-0.2, vmax=3)
+def heatmap(ax, matrix, cmap, titles: list, f_p_val: list, vmin: float =-0.7, vmax: float =1.5):
+    ax.imshow(matrix, cmap=cmap, interpolation='nearest', aspect='auto', vmin=vmin, vmax=vmax)
     ax.set_title('Chrom : %s, Start : %d, End : %d, Resolution : %s' % (titles[0], titles[1], titles[2],titles[3]))
     ax.set_yticks([0, 50, 100, 150, 200, 250])
     ax.set_yticklabels(f_p_val)

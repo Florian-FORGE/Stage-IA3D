@@ -153,14 +153,6 @@ def create_OrcaMatrix(orcafile, cool_matrix) -> OrcaMatrix:
     orca_mat = read_orca_matrix(orcafile)
     return OrcaMatrix(orca_mat[1], orca_mat[2], cool_matrix, orca_mat[3])
 
-def create_OrcaMatrix_compare(pred_ref, pred_mut) -> OrcaMatrix:
-    """
-    Create an OrcaMatrix object with two Orca predictions of the same region, one being the reference, the other for a mutated sequence.
-    """
-    ref = read_orca_matrix(pred_ref)
-    mut = read_orca_matrix(pred_mut)
-    return OrcaMatrix(ref[1], ref[2], mut[3], ref[3])
-
 
 def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile) -> OrcaMatrices:
     """
@@ -198,51 +190,11 @@ def create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile
     
     return OrcaMatrices(di)
 
-def create_OrcaMatrices_compare(file_ref, file_mut) -> OrcaMatrices:
-    """
-    Function to create an OrcaMatrices object from 12 matrices paired by resolution (an orca predicted matix and a cool observed matrix).
-    It is expected that the datafiles of the different resolutions are in an eponym file (e.g. ./file_ref/file_ref_predictions_1Mb.txt)
-    The resolution should be in decrescendo order (from 32Mb to 1Mb) or cresendo order (from 1Mb to 32Mb) for better readability (simply recommended and not necessary).
-    """
-    pred_refs = ["%s/%s_predictions_%dMb.txt" % (file_ref, file_ref, i) for i in [1, 2, 4, 8, 16, 32]]
-    pred_muts = ["%s/%s_predictions_%dMb.txt" % (file_mut, file_mut, i) for i in [1, 2, 4, 8, 16, 32]]
-                
-    matrix1 = create_OrcaMatrix(pred_refs[0],pred_muts[0])
-    matrix2 = create_OrcaMatrix(pred_refs[1],pred_muts[1])
-    matrix3 = create_OrcaMatrix(pred_refs[2],pred_muts[2])
-    matrix4 = create_OrcaMatrix(pred_refs[3],pred_muts[3])
-    matrix5 = create_OrcaMatrix(pred_refs[4],pred_muts[4])
-    matrix6 = create_OrcaMatrix(pred_refs[5],pred_muts[5])
-
-    di={
-    "%s" %matrix1.resolution : matrix1,
-    "%s" %matrix2.resolution : matrix2,
-    "%s" %matrix3.resolution : matrix3,
-    "%s" %matrix4.resolution : matrix4,
-    "%s" %matrix5.resolution : matrix5,
-    "%s" %matrix6.resolution : matrix6
-    }
-    
-    return OrcaMatrices(di)
-
 
 def main(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile, output_scores, output_heatmaps, output_graphs):
     orca_matrices=create_OrcaMatrices(orca_1, orca_2, orca_3, orca_4, orca_5, orca_6, coolfile)
     output_scores_path=os.path.join("Orcanalyse/Outputs", output_scores)
-    with open(output_scores_path, 'w') as f:
-        for key, values in orca_matrices.matrices.items():
-            insulation_scores_observed = values.get_insulation_scores()[0]
-            insulation_scores_observed_str = '\t'.join(str(score) for score in insulation_scores_observed)
-            f.write("Insulation scores_%s_%s_observed" % (str(values.region), key) + '\t' + insulation_scores_observed_str + '\n')
-            PC1_observed = values.get_PC1()[0]
-            PC1_observed_str = '\t'.join(str(score) for score in PC1_observed)
-            f.write("PC1_%s_%s_observed" % (str(values.region), key) + '\t' + PC1_observed_str + '\n')
-            insulation_scores_predicted = values.get_insulation_scores()[1]
-            insulation_scores_predicted_str = '\t'.join(str(score) for score in insulation_scores_predicted)
-            f.write("Insulation scores_%s_%s_predicted" % (str(values.region), key) + '\t' + insulation_scores_predicted_str + '\n')
-            PC1_predicted = values.get_PC1()[1]
-            PC1_predicted_str = '\t'.join(str(score) for score in PC1_predicted)
-            f.write("PC1_%s_%s_predicted" % (str(values.region), key) + '\t' + PC1_predicted_str + '\n')
+    orca_matrices.compare_multi_scores(output_scores_path, i_s_types=["count", "correl"])
     output_heatmap_path = os.path.join("Orcanalyse/Outputs", output_heatmaps)
     orca_matrices.multi_heatmaps(output_heatmap_path)
     output_graphs_path = os.path.join("Orcanalyse/Outputs", output_graphs)
