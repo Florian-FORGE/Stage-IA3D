@@ -111,7 +111,7 @@ def normmats_matrix(matrix: np.ndarray) -> np.ndarray:
     result_matrix = np.zeros_like(matrix)
     for i in range(len(matrix)):
         diag=matrix.diagonal(i)
-        mean_diag.append(diag.mean())
+        mean_diag.append(np.nanmean(diag))
         np.fill_diagonal(result_matrix[:, i:], mean_diag[i])
         if i != 0:
             np.fill_diagonal(result_matrix[i:, :], mean_diag[i])
