@@ -7,7 +7,7 @@ import numpy as np
 
 import pandas as pd
 import os
-from typing import Dict
+from typing import Dict, Union
 from collections import ChainMap
 
 from matplotlib import figure, axes
@@ -41,7 +41,11 @@ The rest of the file should contain the matrix itself
 
 def has_property(obj, prop_name):
     """Check if obj has a property without calling it."""
-    return prop_name in obj.__class__.__dict__ and isinstance(obj.__class__.__dict__[prop_name], property)
+    for cls in obj.__class__.mro():
+        if prop_name in cls.__dict__ \
+            and isinstance(cls.__dict__[prop_name], property):
+            return True
+    return False
 
 def get_attribute(obj, attribute):
     if has_property(obj, attribute):
@@ -86,9 +90,9 @@ def load_attributes_orca_matrix(orcapredfile, normmatfile):
     return region, resolution, orcapred, normmat, genome
 
 def load_coolmat(coolfilepath: str, 
-                        region: list, 
-                        resolution: str, 
-                        rebinned: bool = False):
+                 region: list, 
+                 resolution: str, 
+                 rebinned: bool = False):
     """
     Function to read a cool file and extract the needed data (the observed 
     matrix) for the creation of a RealMatrix object, using cooltools functions.
@@ -105,10 +109,10 @@ def load_coolmat(coolfilepath: str,
           cooltools is used (it is also used if the coolfilepath is as follow 
           'PATH/TO/file.rebinned.mcool'). Else the raw matrix is returned.
     """
-    resolution = resol = int(resolution.replace('Mb', '_000_000'))
+    resol = int(resolution.replace('Mb', '_000_000'))
     resol/=250
 
-    coolres = "%s::resolutions/%d" % (coolfilepath, resolution)
+    coolres = "%s::resolutions/%d" % (coolfilepath, resol)
     clr = cooler.Cooler(coolres)
     
     if not region[0].startswith('chr'):
@@ -183,15 +187,20 @@ class Matrix():
         a string used as identification of the matrix we are using, in case 
         there nothing else to identify it. It is composed of the class name 
         and the type of the Matrix object (e.g. "OrcaMatrix_wt").
+
+    Precision
+    ----------
+    The obs_o_exp attribute (property) is defined in children classes and used 
+    in the parent Matrix class.
+    
     """
     # Class-level constants
     @classmethod
     def get_extremum_heatmap(cls):
-        return EXTREMUM_HEATMAP[cls.__name__]
+        VMIN, VMAX = EXTREMUM_HEATMAP[cls.__name__]
+        return VMIN, VMAX
+
     
-    VMIN, VMAX = get_extremum_heatmap()
-
-
     def __init__(self, region: list, resolution: str, gtype: str = "wt"):
         self.region = region
         self.resolution = resolution
@@ -206,7 +215,7 @@ class Matrix():
     
     @property
     def references(self):
-        info = self.region
+        info = [value for value in self.region]
         info.append(self.resolution)
         info.append(self.gtype)
         return info
@@ -237,9 +246,9 @@ class Matrix():
                      the plots)  
         """
         if mtype == "count" :
-            m = self._obs_o_exp
+            m = self.obs_o_exp
         elif mtype == "correl" :
-            m = np.corrcoef(self._obs_o_exp)
+            m = np.corrcoef(self.obs_o_exp)
         else :
             pass
             raise TypeError("%s is not a valid matrix type for the "
@@ -305,7 +314,7 @@ class Matrix():
         Method to get the bin corresponding to a given position (0-based)
         """
         start, end = self.region[1], self.region[2]
-        bin_range = (end - start)//len(self._obs_o_exp)
+        bin_range = (end - start)//len(self.obs_o_exp)
         return (position - start)//bin_range
     
     def positions2bin_range(self, positions: list) -> list :
@@ -313,7 +322,7 @@ class Matrix():
         Method to get the bin corresponding to a given position list [start, end] (0-based)
         """
         start, end = self.region[1], self.region[2]
-        bin_range = (end - start)//len(self._obs_o_exp)
+        bin_range = (end - start)//len(self.obs_o_exp)
         return [(positions[0] - start)//bin_range, (positions[1] - start)//bin_range]
   
     def bin2positions(self, bin: int) -> list :
@@ -321,11 +330,11 @@ class Matrix():
         Method to get the position corresponding to a given bin (0-based)
         """
         start, end = self.region[1], self.region[2]
-        bin_range = (end - start)//len(self._obs_o_exp)
+        bin_range = (end - start)//len(self.obs_o_exp)
         return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
 
 
-    def formatting(self):
+    def formatting(self, name: str = None):
         """
         Method to produce the formatted position values, title information 
         and specify the cmap used for the graphs.
@@ -335,8 +344,8 @@ class Matrix():
         - f_p_val : list
             list containing the values of the fomatted positions (e.g 10_000_000
             is returned as 10 Mb)
-        titles : list
-            list containing [chom, start, end, resolution]
+        titles : tuple
+            tuple containing (chom, start, end, resolution, gtype)
         cmap : 
             cmap to be used for the heatmap
         """
@@ -346,7 +355,8 @@ class Matrix():
                 + [self.bin2positions(i)[0] for i in range(49,250,50)]
         f_p_val = ['%sb' %bp_formatter.format_eng(value) for value in p_val]
         
-        titles = self.references[0:4]
+        ref = self.references
+        titles = (name, ref[0], ref[1], ref[2], ref[3], ref[4])
         
         cmap=hnh_cmap_ext5
         return f_p_val, titles, cmap
@@ -355,10 +365,12 @@ class Matrix():
                  gs: GridSpec,
                  f: figure.Figure,
                  output_file: str = None, 
-                 vmin: float = VMIN, 
-                 vmax: float = VMAX, 
+                 vmin: float = None, 
+                 vmax: float = None, 
                  i: int = 0, 
-                 j: int = 0):
+                 j: int = 0,
+                 name: str = None,
+                 show: bool = True):
         
         """
         Method to produce the heatmap associated to the obs_o_exp.
@@ -369,6 +381,9 @@ class Matrix():
             the grid layout to place subplots within a figure.
         - f : figure.Figure
             the object that holds all plot elements.
+        - outputfile : str
+            the path to the file in which the heatmaps should be saved.
+            If None, then the heatmaps are plotted.
         - vmin : float
             the minimal value represented on the heatmap. All the 
             values under it will be deemed to be equal to it.
@@ -379,20 +394,38 @@ class Matrix():
             the line in which the heatmap should plotted.
         - j : int
             the column in which the heatmap should be plotted.
-         """
+        - name : str
+            a name associated to the matrix (mostly used when the Matrix
+            object is part of a CompareMatrices object).
+        - show : bool
+            whether to plot the heatmap in case there is no output_file. 
+            If True, then there is a plot. By default, show = True.
         
-        f_p_val, titles, cmap = self.formatting()
+        Returns
+        ----------
+         None
+
+         Side effects
+         ----------
+         - If there is no outputfile and show==True, plots the heatmap.
+         - If there is an outputfile, saves the heatmap in the file.
+         """
+        if not vmin and not vmax :
+            vmin, vmax = self.__class__.get_extremum_heatmap()
+        
+        f_p_val, titles, cmap = self.formatting(name)
 
         ax = f.add_subplot(gs[i, j])
         
-        ax.imshow(self._obs_o_exp, 
+        ax.imshow(self.obs_o_exp, 
                   cmap=cmap, 
                   interpolation='nearest', 
                   aspect='auto', 
                   vmin=vmin, 
                   vmax=vmax)
-        ax.set_title('Chrom : %s, Start : %d, End : %d, '
-                     'Resolution : %s   -   %s' #last one is the type (e.g. "wt")
+
+        ax.set_title('%s    -   Chrom : %s, Start : %d, End : %d, '
+                     'Resolution : %s   -   %s' 
                      % titles)
 
         ax.set_yticks([0, 50, 100, 150, 200, 250])
@@ -403,7 +436,7 @@ class Matrix():
 
         if output_file: 
             plt.savefig(output_file, transparent=True)
-        else:
+        elif show==True:
             plt.show()
     
     @property
@@ -453,12 +486,12 @@ class Matrix():
     def _save_scores(self, 
                     output_scores:str = "None.csv", 
                     list_scores_types: list = ["insulation_count", 
-                                          "PC1", 
-                                          "insulation_corel"],
+                                               "PC1", 
+                                               "insulation_corel"],
                     prefix:str = prefix):
         
         """
-        Method to append the scores (by default all of them) in the sepcified file.
+        Method to append the scores (by default all of them) in the specified file.
         
         """
         output_dir = os.path.dirname(output_scores)
@@ -467,8 +500,10 @@ class Matrix():
         
         with open(output_scores, 'a') as f:
             for value in list_scores_types :
-                score_str = '\t'.join(str(score) for score in get_attribute(self, value))
-                f.write("%s_%s" % (prefix, value) + '\t' + score_str + '\n')
+                scores = get_attribute(self, value)
+                scores_str = '\t'.join(str(score_val) for score_val in scores)
+                f.write("%s_%s" % (prefix, value) + '\t' + scores_str + '\n')
+                
                 
     # def save_graphs(self, 
     #                 output_file: str, 
@@ -600,9 +635,11 @@ class OrcaMatrix(Matrix):
                  normmatfile: str, 
                  gtype: str,
                  ):
-        super().__init__(gtype)
+        self.gtype = gtype
         self.region, self.resolution, self.orcapred, self.normmat, self.genome \
                     = load_attributes_orca_matrix(orcapredfile, normmatfile)
+        super().__init__(self.region, self.resolution, self.gtype)
+        
     
     @property
     def obs_o_exp(self):
@@ -616,7 +653,7 @@ class OrcaMatrix(Matrix):
     
     @property
     def obs(self):
-        if self._obs :
+        if self._obs is not None:
             return self._obs
         else :
             m = np.add(self.obs_o_exp, np.log(self.expect))
@@ -717,7 +754,7 @@ class RealMatrix(Matrix):
 
     @property
     def expect(self):
-        if self._expect:
+        if self._expect is not None:
             return self._expect
         else :
             self._expect = self.get_expect()
@@ -731,7 +768,7 @@ class RealMatrix(Matrix):
         observed over expected matrix calculated by solely dividing the expect
         attribute from the obs attribute stored in the _obs_o_exp attribute.
         """
-        if self._obs_o_exp:
+        if self._obs_o_exp is not None:
             return self._obs_o_exp
         else :
             self._obs_o_exp = np.divide(self.obs, self.expect)
@@ -748,6 +785,71 @@ class RealMatrix(Matrix):
 
     def get_coolfile(self):
         return self.coolfile
+
+
+
+
+class OrcaRun():
+    """
+    Class associated with a given orca run (predicted matrices for deifferent
+    resolutions --presumably 6 as follow : 1Mb, 2Mb, 4Mb, 8Mb, 16Mb, 32Mb--). 
+    Consequently an object of this class is a dictionary which keys are the 
+    resolutions and values are the corresponding OrcaMatrix objects.
+    
+    Parameters
+    ----------
+    di : dict
+        a dictionary which keys are the resolution of the Matrix objects 
+        associated to these keys.
+    """
+    def __init__(self, di: Dict[str, OrcaMatrix]):
+        self.di = di
+        self.region = {key: value.region for key, value in di.items()}
+        self.references = {key: value.references for key, value in di.items()}
+
+
+
+
+def build_OrcaRun(path: str, 
+                  base_name: str, 
+                  list_resolutions: list = ["1Mb", 
+                                            "2Mb",
+                                            "4Mb", 
+                                            "8Mb", 
+                                            "16Mb", 
+                                            "32Mb"], 
+                  gtype: str = "wt") -> Dict[str, OrcaMatrix]:
+    """
+    Builder for Orcarun objects using a list of resolutions, a path, a base name and a 
+    gtype. It is supposed that the base name is shared by all the files of the orca run.
+    
+    Parameters
+    ----------
+    - path : str
+        the path to the files (all the necessary files --orca predictions and
+        normmats-- should be gathered in the same folder).
+    - base_name : str
+        the base_name shared by all the files (e.g. 'orca_' for 
+        'orca_predictions_1Mb.txt', 'orca_normmats_8Mb.txt', 
+        'orca_normmats_32Mb.txt'). It is necessary for this module that the 
+        files are named in this manner.
+    - list_resolutions : list
+        the list of the different resolutions of prediction (e.g. ["1Mb", "2Mb", 
+        "4Mb", "8Mb", "16Mb", "32Mb"]).
+    - gtype : str
+        the type of the genotype studied : wildtype ("wt") or a 
+        mutated variant ("mut").
+    
+    Returns
+    ----------
+    An OrcaRun object.
+    """
+    di = {}
+    for value in list_resolutions :
+        di[value] = OrcaMatrix(orcapredfile=f"{path}/{base_name}_predictions_{value}.txt", 
+                                normmatfile=f"{path}/{base_name}_normmats_{value}.txt", 
+                                gtype=gtype)
+    return OrcaRun(di)
 
 
 
@@ -799,20 +901,29 @@ class CompareMatrices():
     """
 
     def __init__(self, 
-                 ref: Matrix,
-                 comp_dict: Dict[str, Matrix]) :
-                
-        self.region_ref = ref.region
-        self.resolution_ref = ref.resolution
+                 ref: Union[Matrix, OrcaRun, Dict[str, Matrix]],
+                 comp_dict: Union[Dict[str, Matrix], Dict[str, OrcaRun]]) :
+
+        if isinstance(ref, RealMatrix) :
+            self.region_ref = ref.region
+            self.resolution_ref = ref.resolution
+        elif isinstance(ref, OrcaRun) :
+            self.region_ref = ref.region
+            self.resolution_ref = [key for key in ref]
+        
         self.ref = ref
         self.comp_dict = comp_dict
         self.same_ref = True
         
-        for key in comp_dict :
-            if ref.references != comp_dict[key].references :
-                logging.info("The %s Matrix do not have the same references as "
-                             "the reference. Compatibility issues may occur." %key)
-                self.same_ref = False
+        for key, value in comp_dict.items():
+            if hasattr(ref, "references") and hasattr(value, "references"):
+                if ref.references != value.references:
+                    logging.info("The %s object does not have the same references as "
+                                "the reference. Compatibility issues may occur." % key)
+                    self.same_ref = False
+            else:
+                logging.warning("The %s object or the reference does not have a 'references' attribute. "
+                                "Skipping compatibility check." % key)
         
     @property
     def references(self):
@@ -824,7 +935,7 @@ class CompareMatrices():
                                   in self.comp_dict.items()}))
     
 
-    def heatmaps(self, output_file: str = None):
+    def heatmaps(self, output_file: str = None, j: int = 0):
         """
         Function that produces the two heatmaps corresponding to each Matrix object
         and either plot it or save it depending if an output_file is given.
@@ -832,11 +943,11 @@ class CompareMatrices():
         gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=1)
         f = plt.figure(clear=True, figsize=(20, 44))
 
-        self.ref.heatmap(gs=gs, f=f, i=0, j=0)
+        self.ref.heatmap(gs=gs, f=f, i=0, j=j, show=False)
 
         i=1
-        for _, matrix in self.comp_dict.items():
-            matrix.heatmap(gs=gs, f=f, i=i, j=0)
+        for key, matrix in self.comp_dict.items():
+            matrix.heatmap(gs=gs, f=f, i=i, j=j, name=key, show=False)
             i+=1
        
         if output_file: 
@@ -849,7 +960,7 @@ class CompareMatrices():
                                                "PC1", 
                                                "insulation_correl"],
                     output_scores:str = "None", 
-                    extension: str = ".csv",
+                    extension: str = "csv",
                     prefixes: list = [None, None]):
         """
         Method used to store the insulation and PC1 scores in a 
@@ -877,19 +988,19 @@ class CompareMatrices():
             - Saves the scores (insulations and PC1) for each Matrix object using
               the _save_scores() method.
         """
-        
-        if os.path.exists("%s%s" % (output_scores, extension)):
-            i=1
-            while os.path.exists("%s%s" % (output_scores, extension)):
-                output_scores = "%s_%d" % (output_scores, i)
-                i+=1
-        
+        i=1
+        output = output_scores
+        while os.path.exists(f"{output}.{extension}"):
+            output = f"{output_scores}_{i}"
+            i+=1
+        output_scores = f"{output}.{extension}"
+
         if prefixes[0] == None:
             prefixes[0] = self.ref.prefix
 
         self.ref._save_scores(output_scores=output_scores, 
-                                 i_s_types=list_scores_types,
-                                 prefix=prefixes[0])
+                              list_scores_types=list_scores_types,
+                              prefix=prefixes[0])
         
         i=1
         for _, matrix in self.comp_dict.items():
@@ -897,8 +1008,8 @@ class CompareMatrices():
                 prefixes[i] = matrix.prefix
 
             matrix._save_scores(output_scores=output_scores, 
-                                    i_s_types=list_scores_types,
-                                    prefix=prefixes[i])
+                                list_scores_types=list_scores_types,
+                                prefix=prefixes[i])
             i+=1
 
 
@@ -909,7 +1020,8 @@ class CompareMatrices():
                     list_scores_types: list = ["insulation_count", 
                                                "PC1", 
                                                "insulation_correl"],
-                    prefixes: list = [None, None]):
+                    prefixes: list = [None, None],
+                    j: int = 0):
         """
         Function to save in a pdf file the heatmaps and the  plot of the scores  
         in the list_scores_types, represented in two separated graphs, for 
@@ -952,16 +1064,16 @@ class CompareMatrices():
             nb_scores = len(list_scores_types)
             nb_comp = len(self.comp_dict)
             nb_graphs = (nb_scores +1) * (nb_comp + 1)
-            ratios = nb_comp * ([4] + [0,25 for i in range(nb_scores)])
+            ratios = (nb_comp + 1) * ([4] + [0.25 for i in range(nb_scores)])
             gs = GridSpec(nrows=nb_graphs, ncols=1, height_ratios=ratios)
             
             # Create the figure
             f = plt.figure(clear=True, figsize=(20, 44))
             
             # Heatmap_ref
-            self.ref.heatmap(gs=gs, f=f, i=0)
+            self.ref.heatmap(gs=gs, f=f, i=0, j=j, show=False)
                                    
-            # Insulation scores_ref
+            # Scores_ref
             for i in range(nb_scores) :
                 score_type = list_scores_types[i]
                 self.ref._score_plot(gs=gs, 
@@ -969,23 +1081,25 @@ class CompareMatrices():
                                        f_p_val=f_p_val_ref, 
                                        title ="%s_ref" % score_type, 
                                        score_type=score_type, 
-                                       i=i+1)
+                                       i=i+1, 
+                                       j=j)
             
             rep=1
             for key, value in self.comp_dict.items():
                 f_p_val_comp, _, _ = value.formatting()
                 # Heatmap_comp
-                value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep)
-                
-                # Insulation scores_comp
+                value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep, j=j, show=False)
+
+                # Scores_comp
                 for i in range(nb_scores) :
                     score_type = list_scores_types[i]
                     value._score_plot(gs=gs, 
                                         f=f, 
                                         f_p_val=f_p_val_comp, 
                                         title ="%s_comp" % score_type, 
-                                        i_s_type=score_type, 
-                                        i=(nb_scores + 1) * rep + i+1)
+                                        score_type=score_type, 
+                                        i=(nb_scores + 1) * rep + i+1, 
+                                        j=j)
                 rep+=1
 
             # Save the figure to the PDF
@@ -1582,70 +1696,103 @@ def format_ticks(ax: axes,
 #     return CompareMatrices(mat1, mat2)
 
 
-# def ComparePairMatricesPerResol_to_Compare2Matrices(obj: ComparePairMatricesPerResol, 
-#                                                     w_resol: int = 32_000_000) -> Compare2Matrices:
-#     """
-#     Function to extract an PredObsMatrices object from an PredObsMatricesPerResol object selected by its resolution.
-#     """
-#     return obj["%d" % w_resol]
-
-# def build_CompareMatrices(filepathref: str, filepathcomp: str) :
-    ref_df = pd.read_csv(filepathref, header=1)
-    if ref_df["mtype"] == "RealMatrix" :
-        ref = RealMatrix(region = df["region"],
-                         resolution = df["resol"],
-                         gtype = df["gtype"],
-                         coolfilepath = df["coolpath"])
-    
-    elif ref_df["mtype"] == "OrcaMatrix" :
-        ref = OrcaMatrix(orcapredfile = df["orcapredfile"],
-                         normmatfile = df["normmatfile"],
-                         gtype = df["gtype"])
-        
-    df = pd.read_csv(filepathcomp, header=1)
-    comp = {}
-    for index, row in df.iterrows():  
-        if str(row["mtype"]) == "RealMatrix":
-            matrix = RealMatrix(region = row["region"],
-                                resolution = row["resol"],
-                                gtype = row["gtype"],
-                                coolfilepath = row["coolpath"])
-        
-        elif str(row["mtype"]) == "OrcaMatrix":
-            matrix = OrcaMatrix(orcapredfile = row["orcapredfile"],
-                                normmatfile = row["normmatfile"],
-                                gtype = row["gtype"])
-
-        comp[row["name"]] = matrix
-    
-    return CompareMatrices(ref, comp)
-
 
 def build_CompareMatrices(filepathref: str, filepathcomp: str) :
-                
-    df = pd.read_csv(filepathcomp, header=1)
-    comp = {}
-    for index, row in df.iterrows():  
-        if str(row["mtype"]) == "RealMatrix":
-            matrix = RealMatrix(region = row["region"],
-                                resolution = row["resol"],
-                                gtype = row["gtype"],
-                                coolfilepath = row["coolpath"])
-        
-        elif str(row["mtype"]) == "OrcaMatrix":
-            matrix = OrcaMatrix(orcapredfile = row["orcapredfile"],
-                                normmatfile = row["normmatfile"],
-                                gtype = row["gtype"])
-        comp[row["name"]] = matrix
-        
-        if index == 1 :
-            region_1 = matrix.region
-            resolution_1 = matrix.resolution
-                
-    ref_df = pd.read_csv(filepathref, header=1)
-    ref = RealMatrix(region = region_1,
-                     resolution = resolution_1,
-                     gtype = ref_df["gtype"],
-                     coolfilepath = ref_df["coolpath"])
+    """
+    Builder for CompareMatrices objects using two csv files containing the data needed
+    to construct the Matrix (and preferably children classes) objects used for the
+    comparison. It is supposed that the reference is a RealMatrix, so the corresponding
+    file should specify the genotype ('gtype') and path to the cooler file ('coolpath').
+    The compared Matrix objects can be either ReaalMatrix or OrcaMatrix objects, so the 
+    file should include the following columns : mtype, region, resol, gtype, coolpath, 
+    orcapredfile, normmatfile. 
+
+    Parameters:
+        - filepathref (str)
+            The path to a csv file containing the data needed to create the reference 
+            Matrix object (e.g. PATH/TO/file.csv). It is supposed that the reference
+            Matrix oject is actually a RealMatrix object and so the gtype and coolpath
+            are needed (region and resol are extracted from the filepathcomp first 
+            Matrix object). 
+        - filepathcomp (str)
+            The path to a csv file containing the data needed to create all the Matrix
+            objects that we will compare to the reference (e.g. PATH/TO/file.csv). This 
+            file can contain data for RealMatrix and OrcaMatrix objects. Thus there must 
+            be the following columns in the file : mtype, region, resol, gtype, coolpath, 
+            orcapredfile, normmatfile.
     
+    Returns :
+        The CompareMatrices object built with the reference described in the filepathref, 
+        and the comp dictionary built with the Matrix objects (either RealMatrix or 
+        OrcaMatrix) described in the filepath comp.  
+    """       
+    df = pd.read_csv(filepathcomp, header=0, sep='\t')
+    comp = {}
+    for row in df.itertuples(index=False):
+        if row.mtype == "RealMatrix":
+            obj = RealMatrix(region=row.region, 
+                             resolution=row.resol, 
+                             gtype=row.gtype, 
+                             coolfilepath=row.coolpath)
+        
+        elif row.mtype == "OrcaMatrix":
+            obj = OrcaMatrix(orcapredfile=row.orcapredpath, 
+                             normmatfile=row.normmatpath, 
+                             gtype=row.gtype)
+        
+        elif row.mtype == "OrcaRun":
+            obj = build_OrcaRun(path=row.path,
+                                base_name=row.base_name,
+                                # list_resolutions=row.list_resol,
+                                gtype=row.gtype)
+    
+        comp[row.name] = obj
+
+    ref_df = pd.read_csv(filepathref, header=0, sep='\t')
+
+    if ref_df.iloc[0]["mtype"] == "RealMatrix":
+        
+        rebinned=ref_df.iloc[0]["rebinned"]
+        if isinstance(rebinned, str):
+            if rebinned.lower() == "true" :
+                rebinned = True
+        else :
+            rebinned  = False
+
+        if all(isinstance(value, OrcaRun) for value in comp.values()):
+            first_orca_run = next(iter(comp.values()))
+            regions = first_orca_run.region
+            
+            ref = {key: RealMatrix(region = value,
+                                resolution = key,
+                                gtype = ref_df.iloc[0]["gtype"],
+                                coolfilepath = ref_df.iloc[0]["coolpath"],
+                                rebinned=ref_df.iloc[0]["rebinned"]) 
+                        for key, value in regions.items()}
+        
+        elif any(isinstance(value, OrcaRun) for value in comp.values()):
+            raise TypeError("OrcaRun objects cannot be used with other types of"
+                            "objects. This comparison is not supported.")
+        
+        else:
+            ref = next(iter(comp.values())).references
+            ref.pop()
+            resolution_1 = ref.pop()
+            region_1 = ref
+                    
+            ref = RealMatrix(region = region_1,
+                             resolution = resolution_1,
+                             gtype = ref_df.iloc[0]["gtype"],
+                             coolfilepath = ref_df.iloc[0]["coolpath"],
+                             rebinned=ref_df.iloc[0]["rebinned"])
+    elif ref_df.iloc[0]["mtype"] == "OrcaRun":
+        ref = build_OrcaRun(path=ref_df.iloc[0].path,
+                            base_name=ref_df.iloc[0].base_name,
+                            # list_resolutions=ref_df.iloc[0].list_resol,
+                            gtype=ref_df.iloc[0].gtype)
+
     return CompareMatrices(ref, comp)
+
+test = build_CompareMatrices("Orcanalyse/resources/runfiles/ref_orcarun.csv", "Orcanalyse/resources/runfiles/orcarun.csv")
+test.save_graphs(output_scores="Orcanalyse/Outputs/_test_new_module_2", output_file="Orcanalyse/Outputs/_test_new_module_2.pdf")
+
