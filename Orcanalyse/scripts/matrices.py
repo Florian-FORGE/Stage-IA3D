@@ -55,7 +55,7 @@ def has_property(obj, prop_name):
             return True
     return False
 
-def get_attribute(obj, attribute):
+def get_property(obj, attribute):
     if has_property(obj, attribute):
         return getattr(obj, attribute)
     else:
@@ -440,7 +440,7 @@ class Matrix():
 
          Side effects
          ----------
-         - If there is no outputfile and show==True, plots the heatmap.
+         - If there is no outputfile and show==True, shows the heatmap.
          - If there is an outputfile, saves the heatmap in the file.
          """
         if not vmin and not vmax :
@@ -504,7 +504,7 @@ class Matrix():
         
         ax = f.add_subplot(gs[i, j])
 
-        score = get_attribute(self, score_type)
+        score = get_property(self, score_type)
         ax.set_xlim(0, 250)
         ax.plot(score, color=COLOR_CHART[score_type])
         ax.set_ylabel("%s" % score_type)
@@ -530,7 +530,7 @@ class Matrix():
         
         with open(output_scores, 'a') as f:
             for value in list_scores_types :
-                scores = get_attribute(self, value)
+                scores = get_property(self, value)
                 scores_str = '\t'.join(str(score_val) for score_val in scores)
                 f.write("%s_%s" % (prefix, value) + '\t' + scores_str + '\n')
                 
@@ -803,22 +803,13 @@ class OrcaRun():
                               i=i, 
                               j=j)
             j+=1
-        
-
-
 
 
 
 
 def build_OrcaRun(path: str, 
                   base_name: str, 
-                  list_resolutions: list = ["1Mb", 
-                                            "2Mb",
-                                            "4Mb", 
-                                            "8Mb", 
-                                            "16Mb", 
-                                            "32Mb"], 
-                  gtype: str = "wt") -> Dict[str, OrcaMatrix]:
+                  gtype: str = "wt") -> OrcaRun:
     """
     Builder for Orcarun objects using a list of resolutions, a path, a base name and a 
     gtype. It is supposed that the base name is shared by all the files of the orca run.
@@ -833,9 +824,6 @@ def build_OrcaRun(path: str,
         'orca_predictions_1Mb.txt', 'orca_normmats_8Mb.txt', 
         'orca_normmats_32Mb.txt'). It is necessary for this module that the 
         files are named in this manner.
-    - list_resolutions : list
-        the list of the different resolutions of prediction (e.g. ["1Mb", "2Mb", 
-        "4Mb", "8Mb", "16Mb", "32Mb"]).
     - gtype : str
         the type of the genotype studied : wildtype ("wt") or a 
         mutated variant ("mut").
@@ -845,6 +833,12 @@ def build_OrcaRun(path: str,
     An OrcaRun object.
     """
     di = {}
+    df = pd.read_csv(f"{path}/{base_name}.log", 
+                                   sep='\t', 
+                                   skiprows=1, 
+                                   names=["resol", "chrom", "start", "end"])
+    list_resolutions = df["resol"]
+
     for value in list_resolutions :
         di[value] = OrcaMatrix(orcapredfile=f"{path}/{base_name}_predictions_{value}.txt", 
                                 normmatfile=f"{path}/{base_name}_normmats_{value}.txt", 
@@ -947,12 +941,12 @@ class CompareMatrices():
     def heatmaps(self, output_file: str = None, names: list = None):
         """
         Function that produces the heatmaps corresponding to each Matrix object
-        or Orcarun object and either plot it or save it depending if an output_file 
+        or OrcaRun object and either plot it or save it depending if an output_file 
         is given.
         """
         if isinstance(self.ref, Matrix) : 
             gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=1)
-            f = plt.figure(clear=True, figsize=(20, 44))
+            f = plt.figure(clear=True, figsize=(20, 22*(len(self.comp_dict)+1)))
             
             self.ref.heatmap(gs=gs, f=f, i=0, j=0, show=False)
 
@@ -964,17 +958,17 @@ class CompareMatrices():
         else :
             if isinstance(self.ref, OrcaRun) :
                 gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref.di))
-                f = plt.figure(clear=True, figsize=(60, 20))
+                f = plt.figure(clear=True, figsize=(30*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
                 
                 self.ref._heatmaps(gs=gs, f=f, i=0, show=False, name="Reference")
             
             else :
                 gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref))
-                f = plt.figure(clear=True, figsize=(60, 20))
+                f = plt.figure(clear=True, figsize=(30*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
                 
-                j=j
+                j=0
                 for key, value in self.ref.items() :
-                    value.heatmap(gs=gs, f=f, i=i, j=j, name="Reference", show=False)
+                    value.heatmap(gs=gs, f=f, i=0, j=j, name="Reference", show=False)
                     j+=1
 
             i=1
@@ -1001,23 +995,27 @@ class CompareMatrices():
         """
         Method used to store the insulation and PC1 scores in a 
         specified file. By default, it is stored in a file named
-        "None.csv". The .csv format is recommended.
+        "None.csv" or if it exist "None_1.csv" or "None_2.csv", 
+        and so on. The .csv format is recommended.
         
-        Parameters :
-            - list_scores_type : list
+        Parameters
+        ----------
+            - list_scores_type : (list)
                 the list of the scores that sould be saved. By default,
                 scores_type = ["insulation_count", "PC1", "insulation_correl"].
-            - output_scores : str
+            - output_scores : (str)
                 the name of the file in which the data should be saved.
-            - extension : str
+            - extension : (str)
                 the extension of the file, which is by default ".csv".
-            - prefixes : list
+            - prefixes : (list)
                 the prefixes used to name the scores (e.g. ["ref", "name1", ...].
         
-        Returns :
+        Returns
+        ----------
             None
         
-        Side effects :
+        Side effects
+        ----------
             - Check there is no file with the given name in the path used. If 
               there is one, it will use a name that is not already used by trying
               new ones (e.g. "given_name_1.extension").
@@ -1086,31 +1084,33 @@ class CompareMatrices():
                     list_scores_types: list = ["insulation_count", 
                                                "PC1", 
                                                "insulation_correl"],
-                    prefixes: list = None,
-                    j: int = 0):
+                    prefixes: list = None):
         """
         Function to save in a pdf file the heatmaps and the  plot of the scores  
         in the list_scores_types, represented in two separated graphs, for 
         each Matrix object. Plus it saves the scores (Insulation and 
         PC1) in a text file (csv recommended) using the save_scores() method.
 
-        Parameters :
-            - output_file : str
+        Parameters
+        ----------
+            - output_file : (str)
                 the name of the file in which the graphs should be saved.
-            - output_scores : str
+            - output_scores : (str)
                 the name of the file in which the data should be saved.
-            - scores_extension : str
+            - scores_extension : (str)
                 the extension of the  scoresfile, which is by default ".csv".
-            - list_scores_type : list
-                the list of the scores that should be saved. By default,
+            - list_scores_type : (list)
+                the list of the scores that should be saved. By default, list_
                 scores_type = ["insulation_count", "PC1", "insulation_correl"].
-            - prefixes : list
+            - prefixes : (list)
                 the prefixes used to name the scores (e.g. ["ref", "name1", ...].
         
-        Returns :
+        Returns
+        ----------
             None
         
-        Side effedts :
+        Side effects
+        ----------
             - Check if the references of the Matrix objects are the same.
             - Save the scores (insulations and PC1) with the save_scores() method.
             - Produces and saves the heatmaps and plots of the scores in a pdf.
@@ -1168,7 +1168,7 @@ class CompareMatrices():
                     f = plt.figure(clear=True, figsize=(20*len(self.ref.di), 22*(len(self.comp_dict)+1)))
                     
                     # Heatmap_ref
-                    self.ref._heatmaps(gs=gs, f=f, i=0, j=j, show=False)
+                    self.ref._heatmaps(gs=gs, f=f, i=0, j=0, show=False)
                                         
                     # Scores_ref
                     for i in range(nb_scores) :
@@ -1178,18 +1178,19 @@ class CompareMatrices():
                                             title ="%s_ref" % score_type, 
                                             score_type=score_type, 
                                             i=i+1, 
-                                            j=j)
+                                            j=0)
                 else :
                     gs = GridSpec(nrows=nb_graphs, ncols=len(self.ref), height_ratios=ratios)
                     f = plt.figure(clear=True, figsize=(20*len(self.ref), 22*(len(self.comp_dict)+1)))
                     
                     # Heatmap_ref
-                    k,h = j,j
+                    j=0
                     for _, value in self.ref.items() :
-                        value.heatmap(gs=gs, f=f, i=0, j=k, name="Reference", show=False)
-                        k+=1
+                        value.heatmap(gs=gs, f=f, i=0, j=j, name="Reference", show=False)
+                        j+=1
                                         
                     # Scores_ref
+                    j=0
                     for _, value in self.ref.items() :
                         for i in range(nb_scores) :
                             score_type = list_scores_types[i]
@@ -1198,13 +1199,13 @@ class CompareMatrices():
                                                 title ="%s_ref" % score_type, 
                                                 score_type=score_type, 
                                                 i=i+1, 
-                                                j=h)
-                        h+=1
+                                                j=j)
+                        j+=1
                 
                 rep=1
                 for key, value in self.comp_dict.items():
                     # Heatmap_comp
-                    value._heatmaps(gs=gs, f=f, i=(nb_scores + 1) * rep, j=j, show=False)
+                    value._heatmaps(gs=gs, f=f, i=(nb_scores + 1) * rep, j=0, show=False)
 
                     # Scores_comp
                     for i in range(nb_scores) :
@@ -1214,12 +1215,93 @@ class CompareMatrices():
                                             title ="%s_comp" % score_type, 
                                             score_type=score_type, 
                                             i=(nb_scores + 1) * rep + i+1, 
-                                            j=j)
+                                            j=0)
                     rep+=1
 
             pdf.savefig(f)
             plt.close(f)
         pdf.close()
+
+
+    def scores_regression(self,
+                          output_file: str = None,
+                          score_type: str = "insulation_count"):
+        """
+        Method that produces regression for one kind of score and by 
+        comparing the values of each matrix in the comp_dict to the 
+        reference matrix or matrices.
+
+        Parameters
+        ----------
+        - output_file : (str)
+            the file name in which the regression(s) should be saved. If 
+            None, then it is shown without being saved.
+        - score_type : (str)
+            the score type that should be used for the comparison. By 
+            default the insulation score calculated on the count matrix 
+            is used.
+
+        Returns
+        ----------
+        None
+
+        Side effects
+        ----------
+        - If there is no outputfile shows the heatmap.
+        - If there is an outputfile, saves the heatmap in the file.
+
+        """
+        for key, matrix in self.comp_dict.items() :
+            if self.region_ref != matrix.region :
+                raise ValueError("The %s Matrix do not have the same references as "
+                                 "the reference. Compatibility issues may occur." %key)
+        
+        with PdfPages(output_file, keep_empty=False) as pdf:
+            if isinstance(self.ref, Matrix):
+                score_ref = get_property(self.ref, score_type)
+                score_comp = {key: get_property(mat, score_type) 
+                                 for key, mat in self.comp_dict.items()}
+
+                gs = GridSpec(nrows=len(score_comp), ncols=1)
+                f = plt.figure(clear=True, figsize=(10, 10*(len(score_comp))))
+
+                i=0
+                for key, score in score_comp.items() :
+                    ax = f.add_subplot(gs[i, 0])
+                    ax.scatter(score, score_ref)
+                    ax.set_title(f"Scatterplot_{key}_{score_type}")
+            
+            else :
+                if isinstance(self.ref, OrcaRun) :
+                    score_ref = {key: get_property(mat, score_type) 
+                                 for key, mat in self.ref.di.items()}
+                else :
+                    score_ref = {key: get_property(mat, score_type) 
+                                 for key, mat in self.ref.items()}
+                
+                score_comp = {keys: {key: get_property(orcamat, score_type) 
+                                    for key, orcamat in run.di.items()} 
+                                        for keys, run in self.comp_dict.items()}
+
+                gs = GridSpec(nrows=len(score_comp), ncols=len(score_ref))
+                f = plt.figure(clear=True, 
+                               figsize=(10*len(score_ref), 20*(len(score_comp))))
+                
+                i=0
+                for keys in score_comp :
+                    j=0
+                    for key in score_ref :
+                        ax = f.add_subplot(gs[i, j])
+                        ax.scatter(score_comp[keys][key], score_ref[key])
+                        ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
+                        j+=1
+                    i+=1
+                
+            if output_file: 
+                plt.savefig(output_file, transparent=True)
+            else:
+                plt.show()
+
 
 
 
@@ -1270,7 +1352,6 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
         elif row.mtype == "OrcaRun":
             obj = build_OrcaRun(path=row.path,
                                 base_name=row.base_name,
-                                # list_resolutions=row.list_resol,
                                 gtype=row.gtype)
     
         comp[row.name] = obj
@@ -1315,9 +1396,10 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
     elif ref_df.iloc[0]["mtype"] == "OrcaRun":
         ref = build_OrcaRun(path=ref_df.iloc[0].path,
                             base_name=ref_df.iloc[0].base_name,
-                            # list_resolutions=ref_df.iloc[0].list_resol,
                             gtype=ref_df.iloc[0].gtype)
 
     return CompareMatrices(ref, comp)
+
+
 
 
