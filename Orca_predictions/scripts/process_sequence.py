@@ -8,10 +8,10 @@ import os
 
 import sys
 sys.path.append("/home/fforge/orca")
-import orca_predict
-from orca_utils import genomeplot
-from selene_sdk.sequences import Genome
-from selene_utils2 import MemmapGenome
+import orca_predict # type: ignore
+from orca_utils import genomeplot # type: ignore
+from selene_sdk.sequences import Genome # type: ignore
+from selene_utils2 import MemmapGenome # type: ignore
 import pathlib
 # import torch
 
@@ -20,6 +20,9 @@ logging.basicConfig(
     level=logging.INFO,  # Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+
+import time
 
 """
 Functions adapted from IA3D using Orca ressources to predict the Hi-C observed over expected matrices
@@ -94,7 +97,7 @@ def get_sequence(fasta, chrom, start: int = None, end: int = None):
     return sequence, chromlen, _mpos, start
 
 
-def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen):
+def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen, genome):
     """
     Save prediction and normalized matrices at multiple resolutions to text files.
 
@@ -132,15 +135,17 @@ def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chr
     for pred, resol, start, end in zip(hff_predictions, resolutions, starts, ends):
         output = "%s/%s_predictions_%s.txt" % (output_prefix, output_prefix, resol)
         header = ("# Orca=predictions resol=%s mpos=%d wpos=%d chrom=%s start=%d end=%d "
-                  "nbins=250 width=%d chromlen=%d mutation=%s" %
-                  (resol, mpos, wpos, chrom,  start + offset, end + offset, end-start, chromlen, mutation))
+                  "nbins=250 width=%d chromlen=%d mutation=%s genome=%s" %
+                  (resol, mpos, wpos, chrom,  start + offset, end + offset, end-start, 
+                   chromlen, mutation, genome))
         np.savetxt(output, pred, delimiter='\t', header=header, comments='')
     hff_normmats = predict['normmats'][1]
     for pred, resol, start, end in zip(hff_normmats, resolutions, starts, ends):
         output = "%s/%s_normmats_%s.txt" % (output_prefix, output_prefix, resol)
         header = ("# Orca=normmats resol=%s mpos=%s wpos=%d chrom=%s  start=%d end=%d "
-                  "nbins=250 width=%d chromlen=%d mutation=%s" %
-                  (resol, mpos, wpos, chrom, start + offset, end + offset, end-start, chromlen, mutation))
+                  "nbins=250 width=%d chromlen=%d mutation=%s genome=%s" %
+                  (resol, mpos, wpos, chrom, start + offset, end + offset, end-start, 
+                   chromlen, mutation, genome))
         np.savetxt(output, pred, delimiter='\t', header=header, comments='')
 
     outputlog = "%s/%s.log" % (output_prefix, output_prefix)
@@ -174,16 +179,17 @@ def get_encoded_sequence_main (mpos, fasta, chrom):
     return encoded_sequence, _mpos, offset
 
 
-def main(chrom, output_prefix, mutation, mpos = -1, fasta = None, use_cuda: bool = True, use_memmapgenome = True):
+def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool_resol: int = 128000, use_cuda: bool = True, use_memmapgenome = True):
     """
     Run the Orca prediction pipeline to generate Hi-C matrices from a genomic sequence.
 
     Parameters:
-        fasta (str): Path to the FASTA file containing the genomic sequence.
         chrom (str): Chromosome name to extract the sequence from.
         output_prefix (str): The prefix for output files (e.g., .pkl, .pdf, and text files).
         mutation (str): Description of the mutation (if any).
         mpos (int, optional): The midpoint position to zoom into for multiscale prediction. Defaults to -1.
+        fasta (str): Path to the FASTA file containing the genomic sequence.
+        cool_resol (int): The resolution of the cool file and used to ensure that the start positions are aligned (the start poition should be divisible by cool_resol). Defaults to 128_000.
         use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to True.
 
     Returns:
@@ -201,63 +207,117 @@ def main(chrom, output_prefix, mutation, mpos = -1, fasta = None, use_cuda: bool
     # if use_cuda and not torch.cuda.is_available():
     #     raise RuntimeError("CUDA is not available on this system.")
 
+    if cool_resol == 0:
+        print(cool_resol)
+        raise ValueError("cool_resol cannot be zero.")
+
+    start_time = time.time()
+
     if fasta :
+        genome = os.path.splitext(os.path.basename(fasta))[0]
+        
+        step_start = time.time()
+        
         giv_g = get_genome_orca(fasta, use_memmapgenome)
+        
+        step_end = time.time()
+        logging.info(f"Time taken to load genome: {step_end - step_start:.2f} seconds")
+
+
         giv_g.get_chr_lens()
         chromlen = giv_g.len_chrs[chrom]
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
         if mpos != -1 and mpos <= 16_000_000 :
-            _mpos = mpos
+            if mpos == -1 :
+                _mpos = -1
+            else :
+                _mpos = mpos -1
             start = 0
             offset = start
         else :
             start = mpos - 16_000_000
+            start = start -  start%cool_resol
             offset = start
-            if start and chromlen < start + 32_000_000 :
+            if chromlen < start + 32_000_000 :
                 start = chromlen - 32_000_000
+                start = start - start%cool_resol
                 offset = start
-                _mpos = mpos - start
+                _mpos = mpos - start -1
             else :
-                _mpos = mpos
+                _mpos = 16_000_000 - 1
+        
+        step_start = time.time()
+
         encoded_sequence = giv_g.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+        
+        step_end = time.time()
+        logging.info(f"Time taken to get encoded sequence: {step_end - step_start:.2f} seconds")
+
+        step_start = time.time()
+
         orca_predict.load_resources(models=['32M', '256M'], use_cuda=use_cuda)
 
+        step_end = time.time()
+        logging.info(f"Time taken to load the ressources: {step_end - step_start:.2f} seconds")
+        
+
     else :
+        genome = "hg38"
+
+        step_start = time.time()
+
         orca_predict.load_resources(models=['32M', '256M'], use_cuda=use_cuda)
+
+        step_end = time.time()
+        logging.info(f"Time taken to load the ressources : {step_end - step_start:.2f} seconds")
+
+        orca_predict.hg38._unpicklable_init()
         chromlen = orca_predict.hg38.len_chrs[chrom]
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
         if mpos != -1 and mpos <= 16_000_000 :
-            _mpos = mpos
+            _mpos = mpos -1
             start = 0
             offset = start
         else :
             start = mpos - 16_000_000
+            start = start - start%cool_resol
             offset = start
-            if start and chromlen < start + 32_000_000 :
+            if chromlen < start + 32_000_000 :
                 start = chromlen - 32_000_000
+                start = start - start%cool_resol
                 offset = start
-                _mpos = mpos - start
+                _mpos = mpos - start - 1
             else :
-                _mpos = mpos
+                _mpos = 16_000_000 - 1
         
+        step_start = time.time()
+
         encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
 
+        step_end = time.time()
+        logging.info(f"Time taken to get encoded sequence: {step_end - step_start:.2f} seconds")
+    
         
     _mpos = set_mpos(_mpos)
     midpoint = 16_000_000
     wpos = midpoint
     
+    step_start = time.time()
+
     outputs_ref = orca_predict.genomepredict(encoded_sequence, chrom,
                                              mpos=_mpos, wpos=wpos,
                                              use_cuda=use_cuda)
-
     
+    step_end = time.time()
+    logging.info(f"Time taken for predictions: {step_end - step_start:.2f} seconds")
+
+
     output_pkl = "%s.pkl" % output_prefix
     file = open(output_pkl, 'wb')
     pickle.dump(outputs_ref, file)
-    dump_target_matrix(outputs_ref, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen)
+    dump_target_matrix(outputs_ref, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen, genome)
 
     model_labels = ["H1-ESC", "HFF"]
     output_prefix_file = "%s/%s" % (output_prefix, output_prefix)
@@ -270,6 +330,8 @@ def main(chrom, output_prefix, mutation, mpos = -1, fasta = None, use_cuda: bool
         file=output_prefix_file + ".pdf",
         )
 
+    end_time = time.time()
+    logging.info(f"Total time taken by main: {end_time - start_time:.2f} seconds")
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -295,7 +357,13 @@ def parse_arguments():
 
 
 if __name__ == '__main__':
+
     args = parse_arguments()
 
     use_cuda = not args.nocuda
-    main(args.chrom, args.outprefix, args.mutation, args.mpos, args.fasta, use_cuda)
+    main(chrom=args.chrom, output_prefix=args.outprefix, mutation=args.mutation, mpos=args.mpos, fasta=args.fasta, use_cuda=use_cuda)
+    
+    logging.basicConfig(filename=f"{args.outprefix}_command.log", level=logging.INFO, 
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+
+    logging.info(f"Command: {' '.join(sys.argv)}")

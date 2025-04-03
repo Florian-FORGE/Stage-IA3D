@@ -2,7 +2,7 @@ import cooler
 from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
 
 from sklearn.decomposition import PCA
-from sklearn.impute import SimpleImputer
+from sklearn.impute import SimpleImputer, KNNImputer
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -273,10 +273,11 @@ class Matrix():
                      the mean of the scores (this values are added for adjusting 
                      the plots)  
         """
+        
         if mtype == "count" :
             m = self.obs_o_exp
         elif mtype == "correl" :
-            imputer = SimpleImputer(strategy='mean')
+            imputer = KNNImputer(missing_values=np.nan)
             obs_o_exp = imputer.fit_transform(self.obs_o_exp)
             m = np.corrcoef(obs_o_exp)
         else :
@@ -290,7 +291,7 @@ class Matrix():
         scores = []
         for i in range(w, (n-w)):
             score = 0
-            for j in range(i-w, i+w+1):
+            for j in range(i-w, i+w):
                 score+=m[i][j]
             scores.append(score)
         
@@ -320,7 +321,7 @@ class Matrix():
         """
         Method to compute the PC1 values for the matrix. They are stored in a list.
         """
-        imputer = SimpleImputer(strategy='mean')
+        imputer = KNNImputer(missing_values=np.nan)
         obs_o_exp = imputer.fit_transform(self.obs_o_exp)
 
         pca = PCA(n_components=1)
@@ -837,9 +838,10 @@ def build_OrcaRun(path: str,
                                    sep='\t', 
                                    skiprows=1, 
                                    names=["resol", "chrom", "start", "end"])
-    list_resolutions = df["resol"]
+    list_resolutions_desc = df["resol"]
+    list_resolutions_asc = list_resolutions_desc[::-1]
 
-    for value in list_resolutions :
+    for value in list_resolutions_asc :
         di[value] = OrcaMatrix(orcapredfile=f"{path}/{base_name}_predictions_{value}.txt", 
                                 normmatfile=f"{path}/{base_name}_normmats_{value}.txt", 
                                 gtype=gtype)
@@ -946,7 +948,7 @@ class CompareMatrices():
         """
         if isinstance(self.ref, Matrix) : 
             gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=1)
-            f = plt.figure(clear=True, figsize=(20, 22*(len(self.comp_dict)+1)))
+            f = plt.figure(clear=True, figsize=(20, 20*(len(self.comp_dict)+1)))
             
             self.ref.heatmap(gs=gs, f=f, i=0, j=0, show=False)
 
@@ -958,13 +960,13 @@ class CompareMatrices():
         else :
             if isinstance(self.ref, OrcaRun) :
                 gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref.di))
-                f = plt.figure(clear=True, figsize=(30*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
+                f = plt.figure(clear=True, figsize=(20*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
                 
                 self.ref._heatmaps(gs=gs, f=f, i=0, show=False, name="Reference")
             
             else :
                 gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref))
-                f = plt.figure(clear=True, figsize=(30*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
+                f = plt.figure(clear=True, figsize=(20*(len(self.ref)+1), 20*(len(self.comp_dict)+1)))
                 
                 j=0
                 for key, value in self.ref.items() :
@@ -1077,10 +1079,10 @@ class CompareMatrices():
                 j+=1
         
 
-    def save_graphs(self, 
-                    output_file: str, 
+    def all_graphs(self, 
                     output_scores:str,
                     scores_extension: str = "csv", 
+                    output_file: str = None, 
                     list_scores_types: list = ["insulation_count", 
                                                "PC1", 
                                                "insulation_correl"],
@@ -1113,7 +1115,8 @@ class CompareMatrices():
         ----------
             - Check if the references of the Matrix objects are the same.
             - Save the scores (insulations and PC1) with the save_scores() method.
-            - Produces and saves the heatmaps and plots of the scores in a pdf.
+            - Produces and saves the heatmaps and plots of the scores in a pdf, if 
+                there is an output_file, else it shows the graphs.
         """
         for key, matrix in self.comp_dict.items() :
             if self.region_ref != matrix.region :
@@ -1134,7 +1137,7 @@ class CompareMatrices():
                 f = plt.figure(clear=True, figsize=(20, 22*(len(self.comp_dict)+1)))
                 
                 # Heatmap_ref
-                self.ref.heatmap(gs=gs, f=f, i=0, j=j, show=False)
+                self.ref.heatmap(gs=gs, f=f, i=0, j=j, show=False, name="Reference")
                                     
                 # Scores_ref
                 for i in range(nb_scores) :
@@ -1149,14 +1152,14 @@ class CompareMatrices():
                 rep=1
                 for key, value in self.comp_dict.items():
                     # Heatmap_comp
-                    value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep, j=j, show=False)
+                    value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep, j=j, show=False, name=f"{key}")
 
                     # Scores_comp
                     for i in range(nb_scores) :
                         score_type = list_scores_types[i]
                         value._score_plot(gs=gs, 
                                             f=f, 
-                                            title ="%s_comp" % score_type, 
+                                            title =f"{score_type}_{key}", 
                                             score_type=score_type, 
                                             i=(nb_scores + 1) * rep + i+1, 
                                             j=j)
@@ -1168,7 +1171,7 @@ class CompareMatrices():
                     f = plt.figure(clear=True, figsize=(20*len(self.ref.di), 22*(len(self.comp_dict)+1)))
                     
                     # Heatmap_ref
-                    self.ref._heatmaps(gs=gs, f=f, i=0, j=0, show=False)
+                    self.ref._heatmaps(gs=gs, f=f, i=0, j=0, show=False, name="Reference")
                                         
                     # Scores_ref
                     for i in range(nb_scores) :
@@ -1205,21 +1208,25 @@ class CompareMatrices():
                 rep=1
                 for key, value in self.comp_dict.items():
                     # Heatmap_comp
-                    value._heatmaps(gs=gs, f=f, i=(nb_scores + 1) * rep, j=0, show=False)
+                    value._heatmaps(gs=gs, f=f, i=(nb_scores + 1) * rep, j=0, show=False, name=f"{key}")
 
                     # Scores_comp
                     for i in range(nb_scores) :
                         score_type = list_scores_types[i]
                         value._score_plot_(gs=gs, 
                                             f=f, 
-                                            title ="%s_comp" % score_type, 
+                                            title =f"{score_type}_{key}", 
                                             score_type=score_type, 
                                             i=(nb_scores + 1) * rep + i+1, 
                                             j=0)
                     rep+=1
 
-            pdf.savefig(f)
-            plt.close(f)
+            if output_file: 
+                pdf.savefig(f)
+                plt.close(f)
+            else:
+                plt.show()
+            
         pdf.close()
 
 
@@ -1268,7 +1275,7 @@ class CompareMatrices():
                 i=0
                 for key, score in score_comp.items() :
                     ax = f.add_subplot(gs[i, 0])
-                    ax.scatter(score, score_ref)
+                    ax.scatter(score, score_ref, c=COLOR_CHART[score_type])
                     ax.set_title(f"Scatterplot_{key}_{score_type}")
             
             else :
@@ -1276,7 +1283,7 @@ class CompareMatrices():
                     score_ref = {key: get_property(mat, score_type) 
                                  for key, mat in self.ref.di.items()}
                 else :
-                    score_ref = {key: get_property(mat, score_type) 
+                    score_ref = {key: np.log(get_property(mat, score_type)) 
                                  for key, mat in self.ref.items()}
                 
                 score_comp = {keys: {key: get_property(orcamat, score_type) 
@@ -1292,7 +1299,9 @@ class CompareMatrices():
                     j=0
                     for key in score_ref :
                         ax = f.add_subplot(gs[i, j])
-                        ax.scatter(score_comp[keys][key], score_ref[key])
+                        ax.scatter(score_comp[keys][key], 
+                                   score_ref[key], 
+                                   c=COLOR_CHART[score_type])
                         ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
                         j+=1
                     i+=1
