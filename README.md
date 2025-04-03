@@ -1,3 +1,2 @@
-# IA3D
-- A set of scripts to generate mutations on a genome sequence and to predict, using Orca model, the associated 3D interactions
-- Required (conda) packages : pysam, biopython
+# Stage-IA3D
+A compilation of scripts (plus the outputs they produce and the data used to obtain the later) giving ways to simulate mutations, produce predicted Hi-C and compare the reference to the mutation with : heatmaps, insulation and PC1 scores. 
