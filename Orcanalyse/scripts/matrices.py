@@ -2,7 +2,8 @@ import cooler
 from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
 
 from sklearn.decomposition import PCA
-from sklearn.impute import SimpleImputer, KNNImputer
+from sklearn.impute import KNNImputer, SimpleImputer
+from scipy.stats import linregress
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -26,7 +27,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-from config import EXTREMUM_HEATMAP, COLOR_CHART
+from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX
 
 
 """
@@ -228,7 +229,15 @@ class Matrix():
         VMIN, VMAX = EXTREMUM_HEATMAP[cls.__name__]
         return VMIN, VMAX
 
-    
+    @classmethod
+    def which_matrix(cls):
+        """
+        Class method to get the right matrix depending from the class used.
+        (e.g. if the class is RealMatrix then the log_obs_o_exp is used).
+        """
+        return WHICH_MATRIX[cls.__name__]
+
+
     def __init__(self, region: list, resolution: str, gtype: str = "wt"):
         self.region = region
         self.resolution = resolution
@@ -248,8 +257,8 @@ class Matrix():
         info.append(self.gtype)
         return info
     
-
-    def _get_insulation_score(self, 
+    
+    def _get_insulation_score(self,
                               w: int = 5, 
                               mtype: str = "count"
                               ) -> list :
@@ -273,16 +282,16 @@ class Matrix():
                      the mean of the scores (this values are added for adjusting 
                      the plots)  
         """
+        m = get_property(self, self.which_matrix())
         
         if mtype == "count" :
-            m = self.obs_o_exp
-        elif mtype == "correl" :
-            imputer = KNNImputer(missing_values=np.nan)
-            obs_o_exp = imputer.fit_transform(self.obs_o_exp)
-            m = np.corrcoef(obs_o_exp)
-        else :
             pass
-            raise TypeError("%s is not a valid matrix type for the "
+        elif mtype == "correl" :
+            imputer = KNNImputer(missing_values=np.nan, n_neighbors=5, weights="distance")
+            m = imputer.fit_transform(m)
+            m = np.corrcoef(m)
+        else :
+            raise TypeError(f"{mtype} is not a valid matrix type for the "
                             "insulation score calculations. "
                             "Choose between 'count' and 'correl' for "
                             "count or correlation matrices.")
@@ -290,10 +299,21 @@ class Matrix():
         n = len(m)
         scores = []
         for i in range(w, (n-w)):
-            score = 0
-            for j in range(i-w, i+w):
-                score+=m[i][j]
+            s = 0
+            nv = 0
+            for j in range(i-w, i+w+1):
+                if np.isfinite(m[i,j]):
+                    s+=m[i,j]
+                    nv+=1
+            if nv == 0 :
+                score = np.nan
+            else :
+                score = s/nv
             scores.append(score)
+        
+        for i in range(n-2*w):
+            if np.isnan(scores[i]) :
+                scores[i] = np.nanmean(scores[min(0, i-w) : max(i+w, n-1)])
         
         decal = [np.mean(scores) for i in range(w)]
         scores = decal  + scores
@@ -302,41 +322,37 @@ class Matrix():
     
     @property
     def insulation_count(self):
-        if self._insulation_count:
-            return self._insulation_count
-        else :
+        if  not self._insulation_count:
             self._insulation_count = self._get_insulation_score()
-            return self._insulation_count
+        return self._insulation_count
     
     @property
     def insulation_correl(self):
-        if self._insulation_correl:
-            return self._insulation_correl
-        else :
+        if not self._insulation_correl:
             self._insulation_correl = self._get_insulation_score(mtype="correl")
-            return self._insulation_correl
+        return self._insulation_correl
 
 
     def _get_PC1(self) -> list :
         """
         Method to compute the PC1 values for the matrix. They are stored in a list.
         """
-        imputer = KNNImputer(missing_values=np.nan)
-        obs_o_exp = imputer.fit_transform(self.obs_o_exp)
+        m = get_property(self, self.which_matrix())
 
-        pca = PCA(n_components=1)
-        principal_components = pca.fit_transform(obs_o_exp)
+        imputer = KNNImputer(missing_values=np.nan)
+        m = imputer.fit_transform(m)
+
+        pca = PCA(n_components=1, whiten=True)
+        principal_components = pca.fit_transform(m)
         pc1 = principal_components[:, 0]
         
         return pc1.tolist()
     
     @property
     def PC1(self):
-        if self._PC1:
-            return self._PC1
-        else :
+        if not self._PC1:
             self._PC1 = self._get_PC1()
-            return self._PC1
+        return self._PC1
 
     @property 
     def available_scores(self):
@@ -445,7 +461,7 @@ class Matrix():
          - If there is an outputfile, saves the heatmap in the file.
          """
         if not vmin and not vmax :
-            vmin, vmax = self.__class__.get_extremum_heatmap()
+            vmin, vmax = self.get_extremum_heatmap()
         
         f_p_val, titles, cmap = self.formatting(name)
 
@@ -607,12 +623,10 @@ class OrcaMatrix(Matrix):
     
     @property
     def obs(self):
-        if self._obs is not None:
-            return self._obs
-        else :
+        if self._obs is None:
             m = np.add(self.obs_o_exp, np.log(self.expect))
             self._obs = m
-            return self._obs
+        return self._obs
     
     
     def get_genome(self):
@@ -708,11 +722,9 @@ class RealMatrix(Matrix):
 
     @property
     def expect(self):
-        if self._expect is not None:
-            return self._expect
-        else :
+        if self._expect is None:
             self._expect = self.get_expect()
-            return self._expect
+        return self._expect
     
     @property
     def obs_o_exp(self):
@@ -730,11 +742,10 @@ class RealMatrix(Matrix):
     
     @property
     def log_obs_o_exp(self):
-        if self._log_obs_o_exp:
-            return self._log_obs_o_exp
-        else :
-            self._log_obs_o_exp = np.log(self.obs_o_exp)
-            return self._log_obs_o_exp
+        if self._log_obs_o_exp is None:
+            obs_o_exp = np.where(self.obs_o_exp > 0, self.obs_o_exp, 1)
+            self._log_obs_o_exp = np.log(obs_o_exp)
+        return self._log_obs_o_exp
     
 
     def get_coolfile(self):
@@ -1121,7 +1132,7 @@ class CompareMatrices():
         for key, matrix in self.comp_dict.items() :
             if self.region_ref != matrix.region :
                 logging.warning("The %s Matrix do not have the same references as "
-                                "the reference. Compatibility issues may occur." %key)
+                                "the Reference. Compatibility issues may occur." %key)
 
         self.save_scores(list_scores_types, output_scores, scores_extension, prefixes)
 
@@ -1254,8 +1265,8 @@ class CompareMatrices():
 
         Side effects
         ----------
-        - If there is no outputfile shows the heatmap.
-        - If there is an outputfile, saves the heatmap in the file.
+        - If there is no outputfile shows the scatter plot.
+        - If there is an outputfile, saves the scatter plot in the file.
 
         """
         for key, matrix in self.comp_dict.items() :
@@ -1265,8 +1276,8 @@ class CompareMatrices():
         
         with PdfPages(output_file, keep_empty=False) as pdf:
             if isinstance(self.ref, Matrix):
-                score_ref = get_property(self.ref, score_type)
-                score_comp = {key: get_property(mat, score_type) 
+                score_ref = np.array(get_property(self.ref, score_type))
+                score_comp = {key: np.array(get_property(mat, score_type)) 
                                  for key, mat in self.comp_dict.items()}
 
                 gs = GridSpec(nrows=len(score_comp), ncols=1)
@@ -1276,6 +1287,17 @@ class CompareMatrices():
                 for key, score in score_comp.items() :
                     ax = f.add_subplot(gs[i, 0])
                     ax.scatter(score, score_ref, c=COLOR_CHART[score_type])
+
+                    slope, intercept, _, _, _ = linregress(score, score_ref)
+                    regression_line = slope * score + intercept
+
+                    ax.plot(score, regression_line, color="black", label="Regression Line")
+                    
+                    corr_coeff = np.corrcoef(score, score_ref)[0, 1]
+                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
+                            fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
+                                                                            facecolor="white"))
+                
                     ax.set_title(f"Scatterplot_{key}_{score_type}")
             
             else :
@@ -1283,7 +1305,7 @@ class CompareMatrices():
                     score_ref = {key: get_property(mat, score_type) 
                                  for key, mat in self.ref.di.items()}
                 else :
-                    score_ref = {key: np.log(get_property(mat, score_type)) 
+                    score_ref = {key: get_property(mat, score_type) 
                                  for key, mat in self.ref.items()}
                 
                 score_comp = {keys: {key: get_property(orcamat, score_type) 
@@ -1299,9 +1321,25 @@ class CompareMatrices():
                     j=0
                     for key in score_ref :
                         ax = f.add_subplot(gs[i, j])
-                        ax.scatter(score_comp[keys][key], 
-                                   score_ref[key], 
-                                   c=COLOR_CHART[score_type])
+                        
+                        score = np.array(score_comp[keys][key])
+                        ref = np.array(score_ref[key])
+
+                        ax.scatter(score, ref, c=COLOR_CHART[score_type])
+                        
+                        slope, intercept, _, _, _ = linregress(score, ref)
+                        regression_line = slope * score + intercept
+
+                        ax.plot(score, regression_line, 
+                                color="black", label="Regression Line")
+
+                        corr_coeff = np.corrcoef(score, ref)[0, 1]
+                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", 
+                                transform=ax.transAxes, fontsize=12, 
+                                verticalalignment='top', 
+                                bbox=dict(boxstyle="round", 
+                                          facecolor="white"))
+
                         ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
                         j+=1
                     i+=1
@@ -1312,7 +1350,113 @@ class CompareMatrices():
                 plt.show()
 
 
+    def correl_mat(self, outputfile: str = None) :
+        """
+        Method that compares each value of each matrix in the comp_dict 
+        to the corresponding value in the reference matrix or matrices.
 
+        Parameters
+        ----------
+        output_file : (str)
+            the file name in which the regression(s) should be saved. If 
+            None, then it is shown without being saved.
+        
+        Returns
+        ----------
+        None
+
+        Side effects
+        ----------
+        - If there is no outputfile shows the scatter plot.
+        - If there is an outputfile, saves the scatter plot in the file.
+
+        """
+        for key, matrix in self.comp_dict.items() :
+            if self.region_ref != matrix.region :
+                raise ValueError("The %s Matrix do not have the same references as "
+                                 "the reference. Compatibility issues may occur." %key)
+        
+        if isinstance(self.ref, Matrix) :
+            ref = get_property(self.ref, self.ref.which_matrix()).flatten()
+
+            comp = {key: get_property(mat, mat.which_matrix()).flatten() 
+                            for key, mat in self.comp_dict.items()}
+            
+            gs = GridSpec(nrows=len(comp), ncols=1)
+            f = plt.figure(clear=True, figsize=(10, 10*(len(comp))))
+
+            i=0
+            for key, values in comp.items() :
+                array_comp = np.array([values, ref])
+                array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
+
+                ax = f.add_subplot(gs[i, 0])
+                ax.scatter(array_comp[0], array_comp[1], c="black")
+                
+                slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
+                regression_line = slope * array_comp[0] + intercept
+
+                ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
+                
+                corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
+                ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
+                        fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
+                                                                        facecolor="white"))
+                ax.set_title(f"Scatterplot_{key}_correlation")
+                ax.legend()
+                i+=1
+            
+        else :
+            if isinstance(self.ref, OrcaRun) :
+                ref = {key: mat.obs_o_exp.flatten()
+                             for key, mat in self.ref.items()}
+            else :
+                ref = {key: mat.log_obs_o_exp.flatten()
+                             for key, mat in self.ref.items()}
+            
+            comp = {keys: {key: orcamat.obs_o_exp.flatten() 
+                                for key, orcamat in run.di.items()} 
+                            for keys, run in self.comp_dict.items()}
+
+            gs = GridSpec(nrows=len(comp), ncols=len(ref))
+            f = plt.figure(clear=True, 
+                           figsize=(10*len(ref), 20*(len(comp))))
+            
+            i=0
+            for keys in comp :
+                j=0
+                for key in ref :
+                    values = comp[keys][key]
+                    ref_val = ref[key]
+
+                    array_comp = np.array([values, ref_val])
+                    array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
+                    
+                    
+                    ax = f.add_subplot(gs[i, j])
+                    ax.scatter(array_comp[0], 
+                               array_comp[1], 
+                               c="black")
+                    
+                    slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
+                    regression_line = slope * array_comp[0] + intercept
+
+                    ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
+                    
+                    corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
+                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
+                            fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
+                                                                        facecolor="white"))
+                
+                    ax.set_title(f"Scatterplot_{keys}_{key}_correlation")
+                    ax.legend()
+                    j+=1
+                i+=1
+
+        if outputfile: 
+            plt.savefig(outputfile)
+        else:
+            plt.show()
 
 
 def build_CompareMatrices(filepathref: str, filepathcomp: str) :

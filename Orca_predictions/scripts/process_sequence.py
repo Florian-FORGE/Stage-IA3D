@@ -179,7 +179,7 @@ def get_encoded_sequence_main (mpos, fasta, chrom):
     return encoded_sequence, _mpos, offset
 
 
-def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool_resol: int = 128000, use_cuda: bool = True, use_memmapgenome = True):
+def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool_resol: int = 128000, strict: bool = False, use_cuda: bool = True, use_memmapgenome = True):
     """
     Run the Orca prediction pipeline to generate Hi-C matrices from a genomic sequence.
 
@@ -187,10 +187,12 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
         chrom (str): Chromosome name to extract the sequence from.
         output_prefix (str): The prefix for output files (e.g., .pkl, .pdf, and text files).
         mutation (str): Description of the mutation (if any).
-        mpos (int, optional): The midpoint position to zoom into for multiscale prediction. Defaults to -1.
-        fasta (str): Path to the FASTA file containing the genomic sequence.
-        cool_resol (int): The resolution of the cool file and used to ensure that the start positions are aligned (the start poition should be divisible by cool_resol). Defaults to 128_000.
+        mpos (int, optional, optional): The midpoint position to zoom into for multiscale prediction. Defaults to -1.
+        fasta (str, optional): Path to the FASTA file containing the genomic sequence.
+        cool_resol (int, optional): The resolution of the cool file and used to ensure that the start positions are aligned (the start poition should be divisible by cool_resol). Defaults to 128_000.
+        strict (bool,optional) : Whether the start position should be used directly or not. Defaults to False.
         use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to True.
+        use_memmapgenome (bool,optional): Whether to use memmory-mapped genome. Defaults to True.
 
     Returns:
         None
@@ -237,10 +239,14 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
             offset = start
         else :
             start = mpos - 16_000_000
+            if strict and start%cool_resol != 0 :
+                raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
             start = start -  start%cool_resol
             offset = start
             if chromlen < start + 32_000_000 :
                 start = chromlen - 32_000_000
+                if strict and start%cool_resol != 0 :
+                    raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
                 start = start - start%cool_resol
                 offset = start
                 _mpos = mpos - start -1
@@ -282,10 +288,14 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
             offset = start
         else :
             start = mpos - 16_000_000
+            if strict and start%cool_resol != 0 :
+                raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
             start = start - start%cool_resol
             offset = start
             if chromlen < start + 32_000_000 :
                 start = chromlen - 32_000_000
+                if strict and start%cool_resol != 0 :
+                    raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
                 start = start - start%cool_resol
                 offset = start
                 _mpos = mpos - start - 1
