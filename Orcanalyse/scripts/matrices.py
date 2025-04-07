@@ -1,9 +1,11 @@
 import cooler
 from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
+from cooltools.api.eigdecomp import cis_eig
 
 from sklearn.decomposition import PCA
 from sklearn.impute import KNNImputer, SimpleImputer
 from scipy.stats import linregress
+from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -165,6 +167,55 @@ def format_ticks(ax: axes,
     if rotate:
         ax.tick_params(axis='x',rotation=45)
 
+def replace_nan_with_neighbors_mean(arr):
+    """
+    Function to replace NaN values in either a list or a numpy ndarray with the 
+    mean of their neighbors. The function handles the edge cases where the NaN 
+    value is at the beginning or end of the iterative object by using the 
+    available  neighbors (at most it uses the three preceding and succeeding 
+    values, and in a square for ndarray objects).
+    """
+    if isinstance(arr, np.ndarray) :
+        n = arr.shape[0]
+        for i in range(n) :
+            for j in range(n) :
+                if np.isnan(arr[i,j]) :
+                    if 2 < i < n-3 and 2 < j < n-3 :
+                        neighbors = arr[i-3 : i+3, j-3 : j+3]
+                    elif 1 < i < n-2 and 1 < j < n-2 :
+                        neighbors = arr[i-2 : i+2, j-2 : j+2]
+                    elif 0 < i < n-1 and 0 < j < n-1 :
+                        neighbors = arr[i-1 : i+1, j-1 : j+1]
+                    else :
+                        neighbors = []
+                        if i > 0 :
+                            neighbors.append(arr[i-1, j])
+                        if i < n-1 :
+                            neighbors.append(arr[i+1, j])
+                        if j > 0 :
+                            neighbors.append(arr[i, j-1])
+                        if j < n-1 :
+                            neighbors.append(arr[i, j+1])
+
+                    arr[i] = np.nanmean(neighbors) if neighbors is not None else 0
+    else :
+        arr = np.array(arr)
+        for i in range(len(arr)):
+            if np.isnan(arr[i]):
+                if 2 < i < len(arr) - 3 :
+                    neighbors = arr[i-3 : i+3]
+                elif 1 < i < len(arr) - 2 :
+                    neighbors = arr[i-2 : i+2]
+                elif 0 < i < len(arr) - 1 :
+                    neighbors = arr[i-1 : i+1]
+                else :
+                    if i > 0 :
+                        neighbors = [arr[i - 1]]
+                    if i < len(arr) - 1 :
+                        neighbors = [arr[i + 1]]
+                
+                arr[i] = np.nanmean(neighbors) if neighbors is not None else 0
+    return arr
 
 
 
@@ -230,12 +281,12 @@ class Matrix():
         return VMIN, VMAX
 
     @classmethod
-    def which_matrix(cls):
+    def which_matrix(cls, mtype: str = "count"):
         """
         Class method to get the right matrix depending from the class used.
         (e.g. if the class is RealMatrix then the log_obs_o_exp is used).
         """
-        return WHICH_MATRIX[cls.__name__]
+        return WHICH_MATRIX[cls.__name__][mtype]
 
 
     def __init__(self, region: list, resolution: str, gtype: str = "wt"):
@@ -282,13 +333,20 @@ class Matrix():
                      the mean of the scores (this values are added for adjusting 
                      the plots)  
         """
-        m = get_property(self, self.which_matrix())
+        m = get_property(self, self.which_matrix(mtype))
         
         if mtype == "count" :
             pass
         elif mtype == "correl" :
-            imputer = KNNImputer(missing_values=np.nan, n_neighbors=5, weights="distance")
-            m = imputer.fit_transform(m)
+            m = replace_nan_with_neighbors_mean(m)
+            
+            if isinstance(self, OrcaMatrix) :
+                m = gaussian_filter(m, sigma=1)
+                m = (m - np.min(m)) / (np.max(m) - np.min(m))
+                m = np.exp(m)
+            else :
+                m = gaussian_filter(m, sigma=2)
+                m = (m - np.min(m)) / (np.max(m) - np.min(m))
             m = np.corrcoef(m)
         else :
             raise TypeError(f"{mtype} is not a valid matrix type for the "
@@ -333,25 +391,49 @@ class Matrix():
         return self._insulation_correl
 
 
-    def _get_PC1(self) -> list :
+    def _get_PC1(self, det_start: str = "positif") -> list :
         """
-        Method to compute the PC1 values for the matrix. They are stored in a list.
+        Method to compute the PC1 values for the matrix using the 
+        cis_eig() method from cooltools. They are stored in a list.
+        The construction of the matrix is done elsewhere in the code.
         """
-        m = get_property(self, self.which_matrix())
+        # if self.__class__.__name__ == "RealMatrix" :
+        #     A = self.obs
+        #     # imputer = KNNImputer(missing_values = np.nan, n_neighbors = 10, weights = "distance")
+        #     A = replace_nan_with_neighbors_mean(A)
+            
+        #     _, pc1 = cis_eig(A = A, n_eigs = 1)
+        #     pc1 = pc1[0]
+        #     pc1 = replace_nan_with_neighbors_mean(list(pc1))
+            
+        # else : 
+        #     m = get_property(self, self.which_matrix())
 
-        imputer = KNNImputer(missing_values=np.nan)
-        m = imputer.fit_transform(m)
+        #     pca = PCA(n_components=1, whiten=True)
+        #     principal_components = pca.fit_transform(m)
+        #     pc1 = principal_components[:, 0]
 
-        pca = PCA(n_components=1, whiten=True)
-        principal_components = pca.fit_transform(m)
-        pc1 = principal_components[:, 0]
+        # if (det_start == "positif" and pc1[0] < 0) or \
+        #                         (det_start == "negatif" and pc1[0] > 0):
+        #     pc1 = -pc1
+
+        if isinstance(self, OrcaMatrix) :
+            A = np.exp(self.obs)
+        else :
+            A = self.obs
         
+        A = replace_nan_with_neighbors_mean(A)
+            
+        _, pc1 = cis_eig(A = A, n_eigs = 1)
+        pc1 = pc1[0]
+        pc1 = replace_nan_with_neighbors_mean(list(pc1))
+                
         return pc1.tolist()
     
     @property
-    def PC1(self):
+    def PC1(self, det_start: str = "positif"):
         if not self._PC1:
-            self._PC1 = self._get_PC1()
+            self._PC1 = self._get_PC1(det_start)
         return self._PC1
 
     @property 
@@ -466,8 +548,10 @@ class Matrix():
         f_p_val, titles, cmap = self.formatting(name)
 
         ax = f.add_subplot(gs[i, j])
+
+        m = get_property(self, self.which_matrix())
         
-        ax.imshow(self.obs_o_exp, 
+        ax.imshow(m, 
                   cmap=cmap, 
                   interpolation='nearest', 
                   aspect='auto', 
@@ -743,6 +827,7 @@ class RealMatrix(Matrix):
     @property
     def log_obs_o_exp(self):
         if self._log_obs_o_exp is None:
+            obs_o_exp = np.nan_to_num(self.obs_o_exp, nan = 1)
             obs_o_exp = np.where(self.obs_o_exp > 0, self.obs_o_exp, 1)
             self._log_obs_o_exp = np.log(obs_o_exp)
         return self._log_obs_o_exp
@@ -988,7 +1073,7 @@ class CompareMatrices():
             for key, matrix in self.comp_dict.items():
                 if names == None :
                     names = [keys for keys in self.comp_dict]
-                print(names)
+                
                 matrix._heatmaps(gs=gs, f=f, i=i, name=names[i-1], show=False)
                 i+=1
         
