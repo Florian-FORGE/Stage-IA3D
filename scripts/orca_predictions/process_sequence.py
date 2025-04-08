@@ -8,19 +8,15 @@ import os
 
 import sys
 sys.path.append("/home/fforge/orca")
+sys.path.append("/home/miniforge3/envs/orca_env")
 import orca_predict # type: ignore
 from orca_utils import genomeplot # type: ignore
 from selene_sdk.sequences import Genome # type: ignore
 from selene_utils2 import MemmapGenome # type: ignore
 import pathlib
-# import torch
+import torch # type: ignore
 
 import logging
-logging.basicConfig(
-    level=logging.INFO,  # Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
 
 import time
 
@@ -179,7 +175,17 @@ def get_encoded_sequence_main (mpos, fasta, chrom):
     return encoded_sequence, _mpos, offset
 
 
-def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool_resol: int = 128000, strict: bool = False, use_cuda: bool = True, use_memmapgenome = True):
+def main(chrom, 
+         output_prefix, 
+         mutation, 
+         resol_model: str = "32Mb",
+         mpos: int = -1, 
+         fasta: str = None, 
+         cool_resol: int = 128000, 
+         strict: bool = False, 
+         padding_chr: str ="chr1", 
+         use_cuda: bool = True, 
+         use_memmapgenome = True):
     """
     Run the Orca prediction pipeline to generate Hi-C matrices from a genomic sequence.
 
@@ -187,10 +193,12 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
         chrom (str): Chromosome name to extract the sequence from.
         output_prefix (str): The prefix for output files (e.g., .pkl, .pdf, and text files).
         mutation (str): Description of the mutation (if any).
+        resol_model (str, optional) : The resolution model to use for predictions. Defaults to "32Mb".
         mpos (int, optional, optional): The midpoint position to zoom into for multiscale prediction. Defaults to -1.
         fasta (str, optional): Path to the FASTA file containing the genomic sequence.
         cool_resol (int, optional): The resolution of the cool file and used to ensure that the start positions are aligned (the start poition should be divisible by cool_resol). Defaults to 128_000.
         strict (bool,optional) : Whether the start position should be used directly or not. Defaults to False.
+        padding_chr (str, optional) : If resol_model is "256Mb", padding is generally needed to fill the sequence to 256Mb. The padding sequence will be extracted from the padding_chr. Defaults to "chr1". 
         use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to True.
         use_memmapgenome (bool,optional): Whether to use memmory-mapped genome. Defaults to True.
 
@@ -206,12 +214,19 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
     Example:
         main("genome.fasta", "chr1", "output", "mutation", mpos=16000000, use_cuda=True)
     """
-    # if use_cuda and not torch.cuda.is_available():
-    #     raise RuntimeError("CUDA is not available on this system.")
+    if use_cuda and not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available on this system.")
 
     if cool_resol == 0:
         print(cool_resol)
         raise ValueError("cool_resol cannot be zero.")
+
+    if resol_model == "32Mb" :
+        length = 32_000_000
+    elif resol_model == "256Mb" :
+        length = 256_000_000
+    else :
+        raise ValueError("The resolution mmodel has to be either 32Mb or 256Mb. Exiting...")
 
     start_time = time.time()
 
@@ -230,7 +245,7 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
         chromlen = giv_g.len_chrs[chrom]
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
-        if mpos != -1 and mpos <= 16_000_000 :
+        if mpos != -1 and mpos <= length/2 :
             if mpos == -1 :
                 _mpos = -1
             else :
@@ -238,24 +253,24 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
             start = 0
             offset = start
         else :
-            start = mpos - 16_000_000
+            start = mpos - length/2
             if strict and start%cool_resol != 0 :
                 raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
             start = start -  start%cool_resol
             offset = start
-            if chromlen < start + 32_000_000 :
-                start = chromlen - 32_000_000
+            if chromlen < start + length :
+                start = chromlen - length
                 if strict and start%cool_resol != 0 :
                     raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
                 start = start - start%cool_resol
                 offset = start
                 _mpos = mpos - start -1
             else :
-                _mpos = 16_000_000 - 1
+                _mpos = length/2 - 1
         
         step_start = time.time()
 
-        encoded_sequence = giv_g.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+        encoded_sequence = giv_g.get_encoding_from_coords(chrom, start, start + length)[None, :, :]
         
         step_end = time.time()
         logging.info(f"Time taken to get encoded sequence: {step_end - step_start:.2f} seconds")
@@ -282,43 +297,60 @@ def main(chrom, output_prefix, mutation, mpos: int = -1, fasta: str = None, cool
         chromlen = orca_predict.hg38.len_chrs[chrom]
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
-        if mpos != -1 and mpos <= 16_000_000 :
+        if mpos != -1 and mpos <= length/2 :
             _mpos = mpos -1
             start = 0
             offset = start
         else :
-            start = mpos - 16_000_000
+            start = mpos - length/2
             if strict and start%cool_resol != 0 :
                 raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
             start = start - start%cool_resol
             offset = start
-            if chromlen < start + 32_000_000 :
-                start = chromlen - 32_000_000
+            if chromlen < start + length :
+                start = chromlen - length
                 if strict and start%cool_resol != 0 :
                     raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
                 start = start - start%cool_resol
                 offset = start
                 _mpos = mpos - start - 1
             else :
-                _mpos = 16_000_000 - 1
+                _mpos = length/2 - 1
         
         step_start = time.time()
 
-        encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + 32_000_000)[None, :, :]
+        encoded_sequence = orca_predict.hg38.get_encoding_from_coords(chrom, start, start + length)[None, :, :]
 
         step_end = time.time()
         logging.info(f"Time taken to get encoded sequence: {step_end - step_start:.2f} seconds")
     
         
     _mpos = set_mpos(_mpos)
-    midpoint = 16_000_000
+    midpoint = length/2
     wpos = midpoint
     
     step_start = time.time()
 
-    outputs_ref = orca_predict.genomepredict(encoded_sequence, chrom,
-                                             mpos=_mpos, wpos=wpos,
-                                             use_cuda=use_cuda)
+    if resol_model == "32Mb" :
+        outputs_ref = orca_predict.genomepredict(sequence=encoded_sequence, 
+                                                 mchr=chrom,
+                                                 mpos=_mpos, 
+                                                 wpos=wpos,
+                                                 use_cuda=use_cuda)
+    elif resol_model == "256Mb" :
+        outputs_ref = orca_predict.process_sequence(mchr = chrom,
+                                                    mstart = start,
+                                                    mend = start + length,
+                                                    genome = genome,
+                                                    file=None,
+                                                    custom_models=None,
+                                                    target=True,
+                                                    show_genes=True,
+                                                    show_tracks=False,
+                                                    window_radius=length/2,
+                                                    padding_chr=padding_chr,
+                                                    model_labels=None,
+                                                    use_cuda=use_cuda)
     
     step_end = time.time()
     logging.info(f"Time taken for predictions: {step_end - step_start:.2f} seconds")
@@ -357,8 +389,10 @@ def parse_arguments():
                         default=-1,  type=int)
     parser.add_argument('--mutation',
                         required=False, help='The coordinate of the mutated bin.')
+    parser.add_argument('--resol_model',
+                        required=False, help='The resolution model to use for predictions (either 32Mb or 256Mb). Defaults to 32Mb.')
     parser.add_argument('--nocuda',
-                        action="store_true", help='Switching to cpu (default: False)')
+                        action="store_true", help='Switching to cpu (default: True)')
     parser.add_argument('--fasta',
                         required=False, help='fasta file. If None, "Homo_sapiens.GRCh38.dna.primary_assembly.fa" is used by default with hg38 in main.')
 
@@ -371,7 +405,7 @@ if __name__ == '__main__':
     args = parse_arguments()
 
     use_cuda = not args.nocuda
-    main(chrom=args.chrom, output_prefix=args.outprefix, mutation=args.mutation, mpos=args.mpos, fasta=args.fasta, use_cuda=use_cuda)
+    main(chrom=args.chrom, output_prefix=args.outprefix, mutation=args.mutation, mpos=args.mpos, fasta=args.fasta, resol_model=args.resol_model, use_cuda=use_cuda)
     
     logging.basicConfig(filename=f"{args.outprefix}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')

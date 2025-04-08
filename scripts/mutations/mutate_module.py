@@ -11,6 +11,10 @@ from Bio import SeqIO
 
 from mutation import Mutation, Mutator
 
+import logging
+import sys
+sys.path.append("/home/fforge/StageIA3D")
+
 """
 In silico mutation of a sequence specified by a vcf-like file
 
@@ -64,12 +68,12 @@ def main(mutationfile, bed, genome, outfasta: str, mutationtype: str):
 
     mutator.mutate()
     seq_records = mutator.get_SeqRecords()
-    output_path = os.path.join("Mutations/Outputs", outfasta)
+    output_path = os.path.join("outputs/mutations/annotations", outfasta)
     SeqIO.write(seq_records, output_path, "fasta")
     
     data, keys = mutator.get_trace()
     df = pd.DataFrame(data,columns=keys)
-    df.to_csv("Mutations/Outputs/trace.csv", sep="\t", index=False, header=True)
+    df.to_csv("outputs/mutations/trace.csv", sep="\t", index=False, header=True)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -98,4 +102,14 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
-    main(args.mutationfile, args.bed, args.genome, args.output, args.mutationtype)
+    main(mutationfile=args.mutationfile, 
+         bed=args.bed, 
+         genome=args.genome, 
+         outfasta=args.output, 
+         mutationtype=args.mutationtype)
+    
+    logging.basicConfig(filename=f"outputs/mutations/annotations/{args.output}_command.log", level=logging.INFO, 
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+
+    logging.info(f"Command: {' '.join(sys.argv)}")
+
