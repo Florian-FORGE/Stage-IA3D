@@ -1,0 +1,2 @@
+list_resol	base_name	path	gtype	genome	mtype
+"""1Mb"", 2Mb"", ""4Mb"", ""8Mb"", ""16Mb"", ""32Mb"""	test2_H_sapiens	/home/fforge/Stage-IA3D/temp_extradata/test2_H_sapiens	wt	hg38	OrcaRun

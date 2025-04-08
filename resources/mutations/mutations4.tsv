@@ -1,0 +1,2 @@
+chrom	start	end	name	strand	operation	sequence
+1	330	350	inser1	+	insertion	AAAAAAAAAAAAAAAAAAAA
