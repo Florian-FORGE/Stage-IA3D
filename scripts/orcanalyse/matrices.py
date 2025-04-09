@@ -25,6 +25,7 @@ from matplotlib.ticker import EngFormatter
 bp_formatter = EngFormatter(unit = "b", places = 1, sep = " ")
 
 from Cmap_orca import hnh_cmap_ext5
+import inspect
 
 import logging
 logging.basicConfig(
@@ -32,7 +33,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX
+from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX
 
 
 """
@@ -330,7 +331,7 @@ class Matrix():
                 the matrix type from which the insulation score should 
                 be calculated. It has to be one of the following 
                 ["count", "correl"]
-        
+                    
         Returns :
             scores : list of the calculated scores with the w first values being 
                      the mean of the scores (this values are added for adjusting 
@@ -342,13 +343,15 @@ class Matrix():
             pass
         elif mtype == "correl" :
             m = replace_nan_with_neighbors_mean(m)
+            method_name = inspect.currentframe().f_code.co_name
+            indic = SMOOTH_MATRIX[method_name]
             
             if isinstance(self, OrcaMatrix) :
-                m = gaussian_filter(m, sigma=1)
+                m = gaussian_filter(m, sigma=indic["val"]["OrcaMatrix"]) if indic["bool"] else m
                 m = (m - np.min(m)) / (np.max(m) - np.min(m))
                 m = np.exp(m)
             else :
-                m = gaussian_filter(m, sigma=2)
+                m = gaussian_filter(m, sigma=indic["val"][self.__class__.__name__]) if indic["bool"] else m
                 m = (m - np.min(m)) / (np.max(m) - np.min(m))
             m = np.corrcoef(m)
         else :
@@ -448,8 +451,7 @@ class Matrix():
         
         if sign == -1 :
             pc1 = np.multiply(pc1, -1)
-            # pc1 = -pc1
-        
+            
         return pc1.tolist()
     
     @property
@@ -1067,19 +1069,29 @@ class CompareMatrices():
         
         self.same_ref = True
         
-        for key, value in comp_dict.items():
+        for key, obj in comp_dict.items():
             if isinstance(ref, OrcaRun) :
-                if hasattr(ref, "references") and hasattr(value, "references"):
-                    if ref.references != value.references:
+                if hasattr(ref, "references") and hasattr(obj, "references"):
+                    if ref.references != obj.references:
                         logging.info("The %s object does not have the same references as "
                                     "the Reference. Compatibility issues may occur." % key)
                         self.same_ref = False
-            if isinstance(ref, Matrix) :
-                if hasattr(ref, "references") and hasattr(value, "references"):
-                    if ref.references != value.references:
+            elif isinstance(ref, Matrix) :
+                if hasattr(ref, "references") and hasattr(obj, "references"):
+                    if ref.references != obj.references:
                         logging.info("The %s object does not have the same references as "
                                     "the Reference. Compatibility issues may occur." % key)
                         self.same_ref = False
+            elif isinstance(ref, dict) :
+                for resol, matrix in ref.items() :
+                    if resol in obj.di.keys() :
+                        if hasattr(matrix, "references") and hasattr(obj.di[resol], "references"):
+                            if matrix.references != obj.di[resol].references:
+                                logging.info("The %s object does not have the same references as "
+                                            "the Reference. Compatibility issues may occur." % key)
+                                self.same_ref = False
+                    else : 
+                        raise KeyError("The %s key is not in the reference dictionary." % resol)
             else:
                 logging.warning("The %s object or the Reference does not have a 'references' "
                                 "attribute, or do not have compatible types for supported "
@@ -1239,7 +1251,7 @@ class CompareMatrices():
         
 
     def all_graphs(self, 
-                    output_scores:str,
+                    output_scores:str = None,
                     scores_extension: str = "csv", 
                     output_file: str = None, 
                     list_scores_types: list = ["insulation_count", 
@@ -1282,7 +1294,8 @@ class CompareMatrices():
                 logging.warning("The %s Matrix do not have the same references as "
                                 "the Reference. Compatibility issues may occur." %key)
 
-        self.save_scores(list_scores_types, output_scores, scores_extension, prefixes)
+        if output_scores :
+            self.save_scores(list_scores_types, output_scores, scores_extension, prefixes)
 
         with PdfPages(output_file, keep_empty=False) as pdf:
             
@@ -1400,7 +1413,10 @@ class CompareMatrices():
         """
         Method that produces regression for one kind of score and by 
         comparing the values of each matrix in the comp_dict to the 
-        reference matrix or matrices.
+        reference matrix or matrices. It is possible to choose weither 
+        to smooth the matrix values before the construction of the 
+        correlation matrix or not, by changing the relevant parameter 
+        in the config.py file.
 
         Parameters
         ----------
@@ -1411,7 +1427,8 @@ class CompareMatrices():
             the score type that should be used for the comparison. By 
             default the insulation score calculated on the count matrix 
             is used.
-
+        
+        
         Returns
         ----------
         None
@@ -1450,7 +1467,9 @@ class CompareMatrices():
                     ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
                             fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
                                                                             facecolor="white"))
-                
+
+                    ax.set_xlabel(f"{key}'s scores")
+                    ax.set_ylabel("Reference scores")
                     ax.set_title(f"Scatterplot_{key}_{score_type}")
             
             else :
@@ -1492,7 +1511,9 @@ class CompareMatrices():
                                 verticalalignment='top', 
                                 bbox=dict(boxstyle="round", 
                                           facecolor="white"))
-
+                        
+                        ax.set_xlabel(f"{keys}'s scores")
+                        ax.set_ylabel("Reference scores")
                         ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
                         j+=1
                     i+=1
@@ -1506,7 +1527,10 @@ class CompareMatrices():
     def correl_mat(self, outputfile: str = None) :
         """
         Method that compares each value of each matrix in the comp_dict 
-        to the corresponding value in the reference matrix or matrices.
+        to the corresponding value in the reference matrix or matrices. 
+        It is possible to choose weither to smooth the matrix values before 
+        the construction of the correlation matrix or not, by changing the 
+        relevant parameter in the config.py file.        
 
         Parameters
         ----------
@@ -1529,6 +1553,9 @@ class CompareMatrices():
                 raise ValueError("The %s Matrix do not have the same references as "
                                  "the reference. Compatibility issues may occur." %key)
         
+        method_name = inspect.currentframe().f_code.co_name
+        indic = SMOOTH_MATRIX[method_name]
+
         if isinstance(self.ref, Matrix) :
             ref = get_property(self.ref, self.ref.which_matrix()).flatten()
 
@@ -1555,6 +1582,8 @@ class CompareMatrices():
                 ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
                         fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
                                                                         facecolor="white"))
+                ax.set_xlabel(f"{key}'s values")
+                ax.set_ylabel("Reference values")
                 ax.set_title(f"Scatterplot_{key}_correlation")
                 ax.legend()
                 i+=1
@@ -1562,15 +1591,18 @@ class CompareMatrices():
         else :
             if isinstance(self.ref, OrcaRun) :
                 ref = {key: mat.obs_o_exp.flatten()
-                             for key, mat in self.ref.items()}
+                             for key, mat in self.ref.di.items()}
+                ref_sigma = indic["val"]["OrcaMatrix"]
             else :
                 ref = {key: mat.log_obs_o_exp.flatten()
                              for key, mat in self.ref.items()}
+                ref_sigma = indic["val"]["RealMatrix"]
             
-            comp = {keys: {key: orcamat.obs_o_exp.flatten() 
-                                for key, orcamat in run.di.items()} 
+            comp = {keys: {key: {"values" :mat.obs_o_exp.flatten(), 
+                                 "sigma" : indic["val"][mat.__class__.__name__]}
+                                for key, mat in run.di.items()} 
                             for keys, run in self.comp_dict.items()}
-
+            
             gs = GridSpec(nrows=len(comp), ncols=len(ref))
             f = plt.figure(clear=True, 
                            figsize=(10*len(ref), 20*(len(comp))))
@@ -1579,12 +1611,13 @@ class CompareMatrices():
             for keys in comp :
                 j=0
                 for key in ref :
-                    values = comp[keys][key]
-                    values = gaussian_filter(values, sigma=5)
+                    values = comp[keys][key]["values"]
+                    values = gaussian_filter(values, sigma=comp[keys][key]["sigma"]
+                                             ) if indic["bool"] else values
                     values = (values - np.min(values)) / (np.max(values) - np.min(values))
 
                     ref_val = ref[key]
-                    ref_val = gaussian_filter(ref_val, sigma=2)
+                    ref_val = gaussian_filter(ref_val, sigma=ref_sigma) if SMOOTH_MATRIX[method_name] else ref_val
                     ref_val = (ref_val - np.min(ref_val)) / (np.max(ref_val) - np.min(ref_val))
 
                     array_comp = np.array([values, ref_val])
@@ -1605,7 +1638,8 @@ class CompareMatrices():
                     ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
                             fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
                                                                         facecolor="white"))
-                
+                    ax.set_xlabel(f"{keys}'s values")
+                    ax.set_ylabel("Reference values")
                     ax.set_title(f"Scatterplot_{keys}_{key}_correlation")
                     ax.legend()
                     j+=1

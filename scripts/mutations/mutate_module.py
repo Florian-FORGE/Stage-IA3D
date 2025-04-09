@@ -41,8 +41,10 @@ def read_mutations_from_BED(mutationfile,muttype: str ="shuffle",sequence: str =
             if line.startswith("#"):
                 continue
             fields = line.strip().split()
+            name = fields[3] if len(fields)>3 else "None"
+            strand = fields[5] if len(fields)>5 else "+"
             mutation = Mutation(fields[0], fields[1], fields[2],
-                                fields[3], fields[5], muttype, sequence)
+                                name, strand, muttype, sequence)
             intervals.append(mutation)
     return intervals
 
@@ -102,11 +104,11 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
-    # main(mutationfile=args.mutationfile, 
-    #      bed=args.bed, 
-    #      genome=args.genome, 
-    #      outfasta=args.output, 
-    #      mutationtype=args.mutationtype)
+    main(mutationfile=args.mutationfile, 
+         bed=args.bed, 
+         genome=args.genome, 
+         outfasta=args.output, 
+         mutationtype=args.mutationtype)
     
     logging.basicConfig(filename=f"outputs/mutations/annotations/{args.output}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')
