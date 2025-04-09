@@ -102,11 +102,11 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
-    main(mutationfile=args.mutationfile, 
-         bed=args.bed, 
-         genome=args.genome, 
-         outfasta=args.output, 
-         mutationtype=args.mutationtype)
+    # main(mutationfile=args.mutationfile, 
+    #      bed=args.bed, 
+    #      genome=args.genome, 
+    #      outfasta=args.output, 
+    #      mutationtype=args.mutationtype)
     
     logging.basicConfig(filename=f"outputs/mutations/annotations/{args.output}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')

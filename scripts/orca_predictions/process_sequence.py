@@ -226,7 +226,7 @@ def main(chrom,
     elif resol_model == "256Mb" :
         length = 256_000_000
     else :
-        raise ValueError("The resolution mmodel has to be either 32Mb or 256Mb. Exiting...")
+        raise ValueError("The resolution resol_model has to be either 32Mb or 256Mb. Exiting...")
 
     start_time = time.time()
 
@@ -245,7 +245,7 @@ def main(chrom,
         chromlen = giv_g.len_chrs[chrom]
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
-        if mpos != -1 and mpos <= length/2 :
+        if mpos != -1 and mpos <= length//2 :
             if mpos == -1 :
                 _mpos = -1
             else :
@@ -253,7 +253,7 @@ def main(chrom,
             start = 0
             offset = start
         else :
-            start = mpos - length/2
+            start = mpos - length//2
             if strict and start%cool_resol != 0 :
                 raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
             start = start -  start%cool_resol
@@ -266,7 +266,7 @@ def main(chrom,
                 offset = start
                 _mpos = mpos - start -1
             else :
-                _mpos = length/2 - 1
+                _mpos = length//2 - 1
         
         step_start = time.time()
 
@@ -297,12 +297,12 @@ def main(chrom,
         chromlen = orca_predict.hg38.len_chrs[chrom]
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
-        if mpos != -1 and mpos <= length/2 :
+        if mpos != -1 and mpos <= length//2 :
             _mpos = mpos -1
             start = 0
             offset = start
         else :
-            start = mpos - length/2
+            start = mpos - length//2
             if strict and start%cool_resol != 0 :
                 raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
             start = start - start%cool_resol
@@ -315,7 +315,7 @@ def main(chrom,
                 offset = start
                 _mpos = mpos - start - 1
             else :
-                _mpos = length/2 - 1
+                _mpos = length//2 - 1
         
         step_start = time.time()
 
@@ -390,7 +390,8 @@ def parse_arguments():
     parser.add_argument('--mutation',
                         required=False, help='The coordinate of the mutated bin.')
     parser.add_argument('--resol_model',
-                        required=False, help='The resolution model to use for predictions (either 32Mb or 256Mb). Defaults to 32Mb.')
+                        required=False, help='The resolution model to use for predictions (either 32Mb or 256Mb). Defaults to 32Mb.',
+                        default="32Mb", type=str)
     parser.add_argument('--nocuda',
                         action="store_true", help='Switching to cpu (default: True)')
     parser.add_argument('--fasta',
@@ -405,7 +406,7 @@ if __name__ == '__main__':
     args = parse_arguments()
 
     use_cuda = not args.nocuda
-    main(chrom=args.chrom, output_prefix=args.outprefix, mutation=args.mutation, mpos=args.mpos, fasta=args.fasta, resol_model=args.resol_model, use_cuda=use_cuda)
+    main(chrom=args.chrom, output_prefix=args.outprefix, mpos=args.mpos, mutation=args.mutation, resol_model=args.resol_model, use_cuda=use_cuda, fasta=args.fasta)
     
     logging.basicConfig(filename=f"{args.outprefix}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')
