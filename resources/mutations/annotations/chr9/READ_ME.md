@@ -11,4 +11,4 @@ bedtools merge -i GRCh38_refseq_chr9_sorted.bed  > GRCh38_refseq_chr9_sorted_mer
 
 - Checking that each sequence is not repeated
 
-bedtools intersect -a GRCh38_refseq_head10k_sorted_merged.bed -b GRCh38_refseq_head10k_sorted_merged.bed -c | awk '{ print $NF}' | sort | uniq -c
+bedtools intersect -a GRCh38_refseq_chr9_sorted_merged.bed -b GRCh38_refseq_chr9_sorted_merged.bed -c | awk '{ print $NF}' | sort | uniq -c

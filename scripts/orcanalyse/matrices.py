@@ -1,12 +1,10 @@
 import cooler
-from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
+from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected, is_symmetric
 from cooltools.api.eigdecomp import cis_eig
 import bioframe
 from pysam import FastaFile
 
 from sklearn.decomposition import PCA
-from sklearn.impute import KNNImputer, SimpleImputer
-from sklearn.utils.extmath import _deterministic_vector_sign_flip
 from scipy.stats import linregress
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
@@ -33,7 +31,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX
+from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX, TLVs_HEATMAP
 
 
 """
@@ -274,9 +272,18 @@ class Matrix():
 
     Precision
     ----------
-    The obs_o_exp attribute (property) is defined in children classes and used 
-    in the parent Matrix class.
+    The obs_o_exp, exp, obs or log_obs_o_exp attributes (properties) are 
+    defined in children classes and used in the parent Matrix class.
     
+    Configuration
+    ----------
+    The EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX and SMOOTH_MATRIX 
+    dictionaries are imported from the config.py file. They are used 
+    to define the extremum values of the heatmap, the color chart used 
+    for the different scores, the matrix type used for the insulation
+    score calculations and weither to smooth the matrix for correlation
+    calculations.
+        
     """
     # Class-level constants
     @classmethod
@@ -303,13 +310,12 @@ class Matrix():
         self._insulation_count = None
         self._insulation_correl = None
         self._PC1 = None
-        
+                
     
     @property
     def references(self):
         info = [value for value in self.region]
         info.append(self.resolution)
-        info.append(self.gtype)
         return info
     
     
@@ -396,11 +402,15 @@ class Matrix():
             self._insulation_correl = self._get_insulation_score(mtype="correl")
         return self._insulation_correl
 
-    def _get_phasing_track(self) :
+    def _get_phasing_track(self, genome_path: str = None) :
         """
         Method to compute the GC content that can be used as a phasing 
         track. This returns a DataFrame with each line corresponding to 
         a bin and giving informations about, ["chrom", "start", "end", "GC"].
+        
+        Parameters : 
+        genome_path (str) : the path to the reference genome to use for getting
+        the right phasing_track.
         """
         bins = {"chrom" : [], "start" : [], "end" : []}
         for i in range(np.shape(self.obs)[0]):
@@ -410,48 +420,56 @@ class Matrix():
             bins["end"].append(end) 
         
         bins = pd.DataFrame(bins)
-        print(bins)
+        
+        if genome_path is None :
+            if not os.path.isabs(self.refgenome):
+                genome_path = f"./{self.refgenome}/sequence.fa"
+            else :
+                genome_path = self.refgenome
+        if not os.path.isabs(genome_path):
+            base_path = "/home/fforge/Stage-IA3D/notebooks/resources/genome"
+            genome_path = os.path.join(base_path, genome_path)
+        if not genome_path.endswith(".fa"):
+            genome_path += ".fa"
 
-        print(f"Genome file path: {self.genome}")
-        # _genome = FastaFile(self.genome)
-
-        genome = bioframe.load_fasta(self.genome, engine="pyfaidx") ####### There is an issue with the loading of the fasta file
+        genome = bioframe.load_fasta(genome_path, engine="pyfaidx")
 
         gc_cov = bioframe.frac_gc(bins, genome)
 
         return gc_cov
 
-
-
-    def _get_PC1(self) -> list :
+    def _get_PC1(self, genome_path: str = None) -> list :
         """
         Method to compute the PC1 values for the matrix using the 
         cis_eig() method from cooltools. They are stored in a list.
         The construction of the matrix is done elsewhere in the code.
-        """
-        if isinstance(self, OrcaMatrix) :
-            A = np.exp(self.obs)
-        else :
-            A = self.obs
-        
-        A = replace_nan_with_neighbors_mean(A)
 
-        # phasing_track = self._get_phasing_track()["GC"].values
+        Parameters : 
+        genome_path (str) : the path to the reference genome to use for getting
+        the right phasing_track.
+        """
+        A = replace_nan_with_neighbors_mean(self.obs)
+
+        if isinstance(self, OrcaMatrix) :
+            A = np.exp(A)
+            
+        phasing_track = self._get_phasing_track(genome_path=genome_path)["GC"].values
                     
-        # _, pc1 = cis_eig(A = A, n_eigs = 1, phasing_track=phasing_track)
+        _, pc1 = cis_eig(A = A, n_eigs = 1, phasing_track=phasing_track)
         
-        _, pc1 = cis_eig(A = A, n_eigs = 1)
+        # _, pc1 = cis_eig(A = A, n_eigs = 1)
 
         
         pc1 = pc1[0]
         pc1 = replace_nan_with_neighbors_mean(list(pc1))
         
-        max_abs_indice = np.argmax(np.abs(pc1))
-        sign = np.sign(pc1[max_abs_indice])
+        # max_abs_indice = np.argmax(np.abs(pc1))
+        # sign = np.sign(pc1[max_abs_indice])
         
-        if sign == -1 :
-            pc1 = np.multiply(pc1, -1)
-            
+        # if sign == -1 :
+        #     pc1 = np.multiply(pc1, -1)
+        
+        self._PC1 = pc1.tolist()
         return pc1.tolist()
     
     @property
@@ -512,7 +530,7 @@ class Matrix():
         f_p_val = ['%sb' %bp_formatter.format_eng(value) for value in p_val]
         
         ref = self.references
-        titles = (name, ref[0], ref[1], ref[2], ref[3], ref[4])
+        titles = (name, ref[0], ref[1], ref[2], ref[3], self.gtype)
         
         cmap=hnh_cmap_ext5
         return f_p_val, titles, cmap
@@ -527,7 +545,8 @@ class Matrix():
                  j: int = 0,
                  name: str = None,
                  show: bool = True, 
-                 compartment: bool = False
+                 compartment: bool = False,
+                 genome_path: str = None
                  ):
         
         """
@@ -562,6 +581,9 @@ class Matrix():
             whether to plot the compartmentalization of the matrix (determined
             by the PC1 values). If True, then the compartmentalization is 
             plotted. By default, compartment = False.
+        - genome_path : str
+            the path to the reference genome to use for getting
+            the right phasing_track.
         
         Returns
         ----------
@@ -574,6 +596,8 @@ class Matrix():
          """
         if not vmin and not vmax :
             vmin, vmax = self.get_extremum_heatmap()
+
+        TLVs = TLVs_HEATMAP[self.__class__.__name__]
         
         f_p_val, titles, cmap = self.formatting(name)
 
@@ -599,22 +623,26 @@ class Matrix():
         ax.set_xticklabels(f_p_val)
         format_ticks(ax, x=False, y=False)
 
-        if compartment :
-            pc1 = self.PC1
-            
+        if compartment:
+            pc1 = self._get_PC1(genome_path=genome_path)
+            rows, cols = m.shape
+
             for i in range(1, len(pc1) - 1):
-                if pc1[i-1] * pc1[i] < 0:  
-                    if np.abs(pc1[i-1] 
-                              - pc1[i]) >= 0.2: 
-                        ax.plot([0, m.shape[1]],[i,i],'k',lw=2)
-                        ax.plot([i,i],[0, m.shape[0]],'k',lw=2)
-                        
-                if ((pc1[i-1] < pc1[i] > pc1[i+1]) \
-                                or (pc1[i-1] > pc1[i] < pc1[i+1])) \
-                    and (np.abs(pc1[i-1] - pc1[i]) >= 0.5 \
-                         and np.abs(pc1[1] - pc1[i+1]) >= 0.5):
-                    ax.plot([0, m.shape[1]], [i,i], color="gray", lw=1)
-                    ax.plot([i,i], [0, m.shape[0]], color="gray", lw=1)
+                if pc1[i - 1] * pc1[i] < 0:
+                    if np.abs(pc1[i - 1] - pc1[i]) >= TLVs[0]:
+                        if 0 <= i < rows:  
+                            ax.plot([0, cols-1], [i, i], 'k', lw=2)
+                        if 0 <= i < cols: 
+                            ax.plot([i, i], [0, rows-1], 'k', lw=2)
+
+                if ((pc1[i - 1] < pc1[i] > pc1[i + 1]) 
+                                or (pc1[i - 1] > pc1[i] < pc1[i + 1])) \
+                    and (np.abs(pc1[i - 1] - pc1[i]) >= TLVs[1] 
+                                and np.abs(pc1[i + 1] - pc1[i]) >= TLVs[1]):
+                    if 0 <= i < rows:  
+                        ax.plot([0, cols-1], [i, i], color="gray", lw=1)
+                    if 0 <= i < cols:  
+                        ax.plot([i, i], [0, rows-1], color="gray", lw=1)
                                                                                
 
         if output_file: 
@@ -737,8 +765,9 @@ class OrcaMatrix(Matrix):
                  orcapredfile: str, 
                  normmatfile: str, 
                  gtype: str,
-                 ):
+                 refgenome: str):
         self.gtype = gtype
+        self.refgenome = refgenome
         self.region, self.resolution, self.orcapred, self.normmat, self.genome \
                     = load_attributes_orca_matrix(orcapredfile, normmatfile)
         super().__init__(self.region, self.resolution, self.gtype)
@@ -751,13 +780,30 @@ class OrcaMatrix(Matrix):
 
     @property
     def expect(self):
-        self._expect = self.normmat
-        return self.normmat
+        if self._expect is None :
+            expect = np.zeros(self.obs_o_exp.shape)
+            values = self.normmat
+            
+            for i, val in enumerate(values) :
+                if i == 0 :
+                    np.fill_diagonal(expect, val)
+                else :
+                    np.fill_diagonal(expect[:, i:], val)
+                    np.fill_diagonal(expect[i:, :], val)
+            
+            self._expect = expect
+
+        return self._expect
     
     @property
     def obs(self):
         if self._obs is None:
-            m = np.add(self.obs_o_exp, np.log(self.expect))
+            obs_o_exp = replace_nan_with_neighbors_mean(self.obs_o_exp)
+            
+            expect = replace_nan_with_neighbors_mean(self.expect)
+            expect = np.where(expect>0, expect, np.nanmean(expect)*1e-2)
+            
+            m = np.add(obs_o_exp, np.log(expect))
             self._obs = m
         return self._obs
     
@@ -833,6 +879,7 @@ class RealMatrix(Matrix):
         self.coolfilepath = coolfilepath
         self._log_obs_o_exp = None
         self.genome = genome
+        self.refgenome = genome
 
     @property
     def obs(self):
@@ -878,7 +925,7 @@ class RealMatrix(Matrix):
     @property
     def log_obs_o_exp(self):
         if self._log_obs_o_exp is None:
-            obs_o_exp = np.nan_to_num(self.obs_o_exp, nan = 1)
+            obs_o_exp = np.nan_to_num(self.obs_o_exp, nan=1)
             obs_o_exp = np.where(self.obs_o_exp > 0, self.obs_o_exp, 1)
             self._log_obs_o_exp = np.log(obs_o_exp)
         return self._log_obs_o_exp
@@ -930,11 +977,12 @@ class OrcaRun():
                   j: int = 0, 
                   name: str = None, 
                   show: bool = False, 
-                  compartment: bool = False):
+                  compartment: bool = False,
+                  genome_path: str = None):
         j=j
         for key, value in self.di.items() :
             value.heatmap(gs=gs, f=f, i=i, j=j, name=name, show=show, 
-                          compartment=compartment)
+                          compartment=compartment, genome_path=genome_path)
             j+=1
 
     def _score_plot_(self,
@@ -956,9 +1004,18 @@ class OrcaRun():
 
 
 
+def extract_resol_asc(path: str) -> list:
+    df = pd.read_csv(f"{path}/pred.log", 
+                                   sep='\t', 
+                                   skiprows=1, 
+                                   names=["resol", "chrom", "start", "end","padding_chr"])
+    list_resolutions_desc = df["resol"]
+    list_resolutions_asc = list_resolutions_desc[::-1]
+    return list_resolutions_asc
 
-def build_OrcaRun(path: str, 
-                  base_name: str, 
+
+def build_OrcaRun(path: str,
+                  refgenome: str, 
                   gtype: str = "wt") -> OrcaRun:
     """
     Builder for Orcarun objects using a list of resolutions, a path, a base name and a 
@@ -983,17 +1040,14 @@ def build_OrcaRun(path: str,
     An OrcaRun object.
     """
     di = {}
-    df = pd.read_csv(f"{path}/{base_name}.log", 
-                                   sep='\t', 
-                                   skiprows=1, 
-                                   names=["resol", "chrom", "start", "end"])
-    list_resolutions_desc = df["resol"]
-    list_resolutions_asc = list_resolutions_desc[::-1]
+    
+    list_resolutions_asc = extract_resol_asc(path)
 
     for value in list_resolutions_asc :
-        di[value] = OrcaMatrix(orcapredfile=f"{path}/{base_name}_predictions_{value}.txt", 
-                                normmatfile=f"{path}/{base_name}_normmats_{value}.txt", 
-                                gtype=gtype)
+        di[value] = OrcaMatrix(orcapredfile=f"{path}/pred_predictions_{value}.txt", 
+                                normmatfile=f"{path}/pred_normmats_{value}.txt", 
+                                gtype=gtype,
+                                refgenome=refgenome)
     return OrcaRun(di)
 
 
@@ -1073,29 +1127,32 @@ class CompareMatrices():
             if isinstance(ref, OrcaRun) :
                 if hasattr(ref, "references") and hasattr(obj, "references"):
                     if ref.references != obj.references:
-                        logging.info("The %s object does not have the same references as "
-                                    "the Reference. Compatibility issues may occur." % key)
+                        logging.info(f"The {key} object does not have the same references as "
+                                     f"the Reference. Compatibility issues may occur. \n "
+                                     f"{ref.references} \n {obj.references}")
                         self.same_ref = False
             elif isinstance(ref, Matrix) :
                 if hasattr(ref, "references") and hasattr(obj, "references"):
                     if ref.references != obj.references:
-                        logging.info("The %s object does not have the same references as "
-                                    "the Reference. Compatibility issues may occur." % key)
+                        logging.info(f"The {key} object does not have the same references as "
+                                     f"the Reference. Compatibility issues may occur. \n " 
+                                     f"{ref.references} \n {obj.references}")
                         self.same_ref = False
             elif isinstance(ref, dict) :
                 for resol, matrix in ref.items() :
                     if resol in obj.di.keys() :
                         if hasattr(matrix, "references") and hasattr(obj.di[resol], "references"):
                             if matrix.references != obj.di[resol].references:
-                                logging.info("The %s object does not have the same references as "
-                                            "the Reference. Compatibility issues may occur." % key)
+                                logging.info(f"The {key} object does not have the same references as "
+                                             f"the Reference. Compatibility issues may occur. \n " 
+                                             f"{ref.references} \n {obj.references}")
                                 self.same_ref = False
                     else : 
-                        raise KeyError("The %s key is not in the reference dictionary." % resol)
+                        raise KeyError(f"The {resol} key is not in the reference dictionary.")
             else:
-                logging.warning("The %s object or the Reference does not have a 'references' "
-                                "attribute, or do not have compatible types for supported "
-                                "comparison. Skipping compatibility check." % key)
+                logging.warning(f"The {key} object or the Reference does not have a 'references' "
+                                f"attribute, or do not have compatible types for supported "
+                                f"comparison. Skipping compatibility check.")
         
     @property
     def references(self):
@@ -1107,22 +1164,43 @@ class CompareMatrices():
                                   in self.comp_dict.items()}))
     
 
-    def heatmaps(self, output_file: str = None, names: list = None, compartment: bool = False):
+    def heatmaps(self, 
+                 output_file: str = None, 
+                 names: list = None, 
+                 compartment: bool = False, 
+                 genome_path: str =None):
         """
         Function that produces the heatmaps corresponding to each Matrix object
         or OrcaRun object and either plot it or save it depending if an output_file 
         is given.
+
+        Parameters : 
+        - output_file : str, optional
+            the path to the file in which the heatmaps should be saved. If None, then 
+            the heatmaps are solely plotted.
+        - names : list, optional
+            list of names to associate with the matrices of the compared objects in case 
+            we have various resolutions (if not given, uses the keys from the compared 
+            dictionary).
+        compartment : bool, optional
+            weither to plot the compartment limits estimated with the PC1 values. By 
+            default, compartment = False.
+        - genome_path : str
+            the path to the reference genome to use for getting the right phasing_track.
         """
         if isinstance(self.ref, Matrix) : 
             gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=1)
             f = plt.figure(clear=True, figsize=(20, 20*(len(self.comp_dict)+1)))
             
-            self.ref.heatmap(gs=gs, f=f, i=0, j=0, show=False, compartment=compartment)
+            self.ref.heatmap(gs=gs, f=f, i=0, j=0, 
+                             show=False, 
+                             compartment=compartment,
+                             genome_path=genome_path)
 
             i=1
             for key, matrix in self.comp_dict.items():
                 matrix.heatmap(gs=gs, f=f, i=i, j=0, name=key, show=False, 
-                               compartment=compartment)
+                               compartment=compartment, genome_path=genome_path)
                 i+=1
 
         else :
@@ -1131,7 +1209,7 @@ class CompareMatrices():
                 f = plt.figure(clear=True, figsize=(20*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
                 
                 self.ref._heatmaps(gs=gs, f=f, i=0, show=False, name="Reference", 
-                                   compartment=compartment)
+                                   compartment=compartment, genome_path=genome_path)
             
             else :
                 gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref))
@@ -1140,7 +1218,7 @@ class CompareMatrices():
                 j=0
                 for key, value in self.ref.items() :
                     value.heatmap(gs=gs, f=f, i=0, j=j, name="Reference", show=False, 
-                                  compartment=compartment)
+                                  compartment=compartment, genome_path=genome_path)
                     j+=1
 
             i=1
@@ -1149,7 +1227,7 @@ class CompareMatrices():
                     names = [keys for keys in self.comp_dict]
                 
                 matrix._heatmaps(gs=gs, f=f, i=i, name=names[i-1], show=False, 
-                                 compartment=compartment)
+                                 compartment=compartment, genome_path=genome_path)
                 i+=1
         
                
@@ -1257,7 +1335,8 @@ class CompareMatrices():
                     list_scores_types: list = ["insulation_count", 
                                                "PC1", 
                                                "insulation_correl"],
-                    prefixes: list = None):
+                    prefixes: list = None,
+                    compartment: bool = True):
         """
         Function to save in a pdf file the heatmaps and the  plot of the scores  
         in the list_scores_types, represented in two separated graphs, for 
@@ -1277,6 +1356,10 @@ class CompareMatrices():
                 scores_type = ["insulation_count", "PC1", "insulation_correl"].
             - prefixes : (list)
                 the prefixes used to name the scores (e.g. ["ref", "name1", ...].
+            - compartment : bool
+                whether to plot the compartmentalization of the matrix (determined
+                by the PC1 values). If True, then the compartmentalization is 
+                plotted. By default, compartment = True.
         
         Returns
         ----------
@@ -1310,7 +1393,7 @@ class CompareMatrices():
                 
                 # Heatmap_ref
                 self.ref.heatmap(gs=gs, f=f, i=0, j=j, show=False, name="Reference", 
-                                 compartment=True)
+                                 compartment=compartment)
                                     
                 # Scores_ref
                 for i in range(nb_scores) :
@@ -1326,7 +1409,7 @@ class CompareMatrices():
                 for key, value in self.comp_dict.items():
                     # Heatmap_comp
                     value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep, j=j, show=False, name=f"{key}", 
-                                  compartment=True)
+                                  compartment=compartment)
 
                     # Scores_comp
                     for i in range(nb_scores) :
@@ -1346,7 +1429,7 @@ class CompareMatrices():
                     
                     # Heatmap_ref
                     self.ref._heatmaps(gs=gs, f=f, i=0, j=0, show=False, name="Reference", 
-                                       compartment=True)
+                                       compartment=compartment)
                                         
                     # Scores_ref
                     for i in range(nb_scores) :
@@ -1365,7 +1448,7 @@ class CompareMatrices():
                     j=0
                     for _, value in self.ref.items() :
                         value.heatmap(gs=gs, f=f, i=0, j=j, name="Reference", show=False, 
-                                      compartment=True)
+                                      compartment=compartment)
                         j+=1
                                         
                     # Scores_ref
@@ -1385,7 +1468,7 @@ class CompareMatrices():
                 for key, value in self.comp_dict.items():
                     # Heatmap_comp
                     value._heatmaps(gs=gs, f=f, i=(nb_scores + 1) * rep, j=0, show=False, name=f"{key}", 
-                                    compartment=True)
+                                    compartment=compartment)
 
                     # Scores_comp
                     for i in range(nb_scores) :
@@ -1697,7 +1780,7 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
         
         elif row.mtype == "OrcaRun":
             obj = build_OrcaRun(path=row.path,
-                                base_name=row.base_name,
+                                refgenome=row.refgenome,
                                 gtype=row.gtype)
     
         comp[row.name] = obj
@@ -1741,9 +1824,9 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
                              coolfilepath = ref_df.iloc[0]["coolpath"],
                              rebinned=ref_df.iloc[0]["rebinned"])
     elif ref_df.iloc[0]["mtype"] == "OrcaRun":
-        ref = build_OrcaRun(path=ref_df.iloc[0].path,
-                            base_name=ref_df.iloc[0].base_name,
-                            gtype=ref_df.iloc[0].gtype)
+        ref = build_OrcaRun(path=ref_df.iloc[0]["path"],
+                            refgenome=ref_df.iloc[0]["genome"],
+                            gtype=ref_df.iloc[0]["gtype"])
 
     return CompareMatrices(ref, comp)
 

@@ -93,7 +93,7 @@ def get_sequence(fasta, chrom, start: int = None, end: int = None):
     return sequence, chromlen, _mpos, start
 
 
-def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen, genome):
+def dump_target_matrix(predict, offset, mpos, wpos, mutation, chrom, chromlen, genome, resol_model, padding_chr, full_path: str = None):
     """
     Save prediction and normalized matrices at multiple resolutions to text files.
 
@@ -101,54 +101,70 @@ def dump_target_matrix(predict, output_prefix, offset, mpos, wpos, mutation, chr
         - predict (dict): A dictionary containing prediction results. Keys include:
                         - 'predictions': List of prediction matrices for each resolution.
                         - 'normmats': List of normalized matrices for each resolution.
-        - output_prefix (str): The prefix for output file names. A directory with this name will be created if it doesn't exist.
+        - full_path (str): The path to the repository in which predictions will be saved. A directory with this name will be created if it doesn't exist.
         - offset (int): The offset to adjust start and end coordinates.
         - mpos (int): The midpoint position of the sequence.
         - wpos (int): The window position (midpoint of the sequence).
         - mutation (str): Description of the mutation (if any).
         - chrom (str): Chromosome name.
         - chromlen (int): Length of the chromosome.
+        - genome (str): Name of the genome (e.g. "hg38").
+        - resol_model (str): The resolution model used for predictions (e.g. "32Mb" or "256Mb").
+        - padding_chr (str): The name of the padding chromosome used if resol_model is "256Mb".
 
     Returns:
         None
 
     Side Effects:
         - Writes prediction and normalized matrices to text files.
-        - Creates a log file with matrix coordinates.
+        - Creates a log file with matrix coordinates and padding chromosome information.
 
     Example:
         dump_target_matrix(predict, "output", 1000, 16000000, 16000000, "mutation", "chr1", 248956422)
     """
-    if output_prefix and not os.path.exists(output_prefix):
-        os.makedirs(output_prefix)
+    if full_path and not os.path.exists(full_path):
+        os.makedirs(full_path)
 
-    resolutions = ["%dMb" % r for r in [32, 16, 8, 4, 2, 1]]
+    if resol_model == "32Mb" :
+        resolutions = [f"{r}Mb" for r in [32, 16, 8, 4, 2, 1]]
+    elif resol_model == "256Mb" :
+        resolutions = [f"{r}Mb" for r in [256, 128, 64, 32]]
+
+    starts = predict['start_coords']
+    ends = predict['end_coords']
+    
+    _mpos = mpos if resol_model == "32Mb" else "None"
+    _wpos = wpos if resol_model == "32Mb" else "None"
+    _padding_chr = padding_chr if resol_model == "256Mb" else "None"
 
     # Hff is the second prediction hence 1 in 0-based
     hff_predictions = predict['predictions'][1]
-    starts = predict['start_coords']
-    ends = predict['end_coords']
+    
     for pred, resol, start, end in zip(hff_predictions, resolutions, starts, ends):
-        output = "%s/%s_predictions_%s.txt" % (output_prefix, output_prefix, resol)
-        header = ("# Orca=predictions resol=%s mpos=%d wpos=%d chrom=%s start=%d end=%d "
-                  "nbins=250 width=%d chromlen=%d mutation=%s genome=%s" %
-                  (resol, mpos, wpos, chrom,  start + offset, end + offset, end-start, 
-                   chromlen, mutation, genome))
+        output = f"{full_path}/pred_predictions_{resol}.txt" if full_path else f"{genome}_{chrom}_{mpos}/pred_predictions_{resol}.txt"
+        header = (f"# Orca=predictions resol={resol} chrom={chrom} mpos={_mpos} " 
+                  f"wpos={_wpos} start={int(start + offset)} end={int(end + offset)} "
+                  f"nbins=250 width={int(end - start)} chromlen={chromlen} "
+                  f"mutation={mutation} genome={genome} padding_chr={_padding_chr}")
         np.savetxt(output, pred, delimiter='\t', header=header, comments='')
-    hff_normmats = predict['normmats'][1]
-    for pred, resol, start, end in zip(hff_normmats, resolutions, starts, ends):
-        output = "%s/%s_normmats_%s.txt" % (output_prefix, output_prefix, resol)
-        header = ("# Orca=normmats resol=%s mpos=%s wpos=%d chrom=%s  start=%d end=%d "
-                  "nbins=250 width=%d chromlen=%d mutation=%s genome=%s" %
-                  (resol, mpos, wpos, chrom, start + offset, end + offset, end-start, 
-                   chromlen, mutation, genome))
-        np.savetxt(output, pred, delimiter='\t', header=header, comments='')
+    
+    hff_normmats = [mat for _, mat in predict['normmats'][1].items()] \
+                        if resol_model == "256Mb" else predict['normmats'][1]
 
-    outputlog = "%s/%s.log" % (output_prefix, output_prefix)
+    for pred, resol, start, end in zip(hff_normmats, resolutions, starts, ends):
+        output = f"{full_path}/pred_normmats_{resol}.txt" if full_path else f"{genome}_{chrom}_{mpos}/pred_normmats_{resol}.txt"
+        header = ("# Orca=predictions resol={resol} chrom={chrom} mpos={_mpos} " 
+                  f"wpos={_wpos} start={int(start + offset)} end={int(end + offset)} "
+                  f"nbins=250 width={int(end - start)} chromlen={chromlen} "
+                  f"mutation={mutation} genome={genome} padding_chr={_padding_chr}")
+        np.savetxt(output, pred[0], delimiter='\t', header=header, comments='')
+
+    outputlog = f"{full_path}/pred.log" if full_path else f"{genome}_{chrom}_{mpos}/pred.log"
     with open(outputlog, "w") as fout:
         fout.write("# Coordinates of the different matrix in descending order\n")
+        # fout.write("resol\tchrom\tstart\tend\tpadding_chr\n")
         for resol, start, end in zip(resolutions, starts, ends):
-            fout.write("%s\t%s\t%d\t%d\n" % (resol, chrom, start + offset, end + offset))
+            fout.write(f"{resol}\t{chrom}\t{int(start + offset)}\t{int(end + offset)}\t{_padding_chr}\n")
 
 def get_genome_orca(fasta, use_memmapgenome):
     if use_memmapgenome and pathlib.Path("%s.mmap" % fasta).exists() :
@@ -177,7 +193,7 @@ def get_encoded_sequence_main (mpos, fasta, chrom):
 
 def main(chrom, 
          output_prefix, 
-         mutation, 
+         mutation: str = None, 
          resol_model: str = "32Mb",
          mpos: int = -1, 
          fasta: str = None, 
@@ -185,14 +201,15 @@ def main(chrom,
          strict: bool = False, 
          padding_chr: str ="chr1", 
          use_cuda: bool = True, 
-         use_memmapgenome = True):
+         use_memmapgenome = True,
+         pred_path: str =None):
     """
     Run the Orca prediction pipeline to generate Hi-C matrices from a genomic sequence.
 
     Parameters:
         chrom (str): Chromosome name to extract the sequence from.
         output_prefix (str): The prefix for output files (e.g., .pkl, .pdf, and text files).
-        mutation (str): Description of the mutation (if any).
+        mutation (str, optional): Description of the mutation (if any).
         resol_model (str, optional) : The resolution model to use for predictions. Defaults to "32Mb".
         mpos (int, optional, optional): The midpoint position to zoom into for multiscale prediction. Defaults to -1.
         fasta (str, optional): Path to the FASTA file containing the genomic sequence.
@@ -201,6 +218,7 @@ def main(chrom,
         padding_chr (str, optional) : If resol_model is "256Mb", padding is generally needed to fill the sequence to 256Mb. The padding sequence will be extracted from the padding_chr. Defaults to "chr1". 
         use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to True.
         use_memmapgenome (bool,optional): Whether to use memmory-mapped genome. Defaults to True.
+        pred_path (str, optional): Path to the directory where the predictions will be saved. Defaults to None. If None, the predictions will be saved in the current working directory.
 
     Returns:
         None
@@ -230,6 +248,9 @@ def main(chrom,
 
     start_time = time.time()
 
+    if mpos == -1 :
+        mpos = int(length // 2)
+
     if fasta :
         genome = os.path.splitext(os.path.basename(fasta))[0]
         
@@ -246,10 +267,7 @@ def main(chrom,
         if chromlen < mpos :
             raise ValueError("The mpos has to be in the chromosome. Exiting...")
         if mpos != -1 and mpos <= length//2 :
-            if mpos == -1 :
-                _mpos = -1
-            else :
-                _mpos = mpos -1
+            _mpos = mpos -1
             start = 0
             offset = start
         else :
@@ -259,14 +277,14 @@ def main(chrom,
             start = start -  start%cool_resol
             offset = start
             if chromlen < start + length :
-                start = chromlen - length
+                start = int(chromlen - length)
                 if strict and start%cool_resol != 0 :
                     raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
                 start = start - start%cool_resol
                 offset = start
                 _mpos = mpos - start -1
             else :
-                _mpos = length//2 - 1
+                _mpos = int(length//2 - 1)
         
         step_start = time.time()
 
@@ -308,14 +326,14 @@ def main(chrom,
             start = start - start%cool_resol
             offset = start
             if chromlen < start + length :
-                start = chromlen - length
+                start = int(chromlen - length)
                 if strict and start%cool_resol != 0 :
                     raise ValueError("The start position has to be divisible by the cool_resol. Exiting...")
                 start = start - start%cool_resol
                 offset = start
                 _mpos = mpos - start - 1
             else :
-                _mpos = length//2 - 1
+                _mpos = int(length//2 - 1)
         
         step_start = time.time()
 
@@ -326,7 +344,7 @@ def main(chrom,
     
         
     _mpos = set_mpos(_mpos)
-    midpoint = length/2
+    midpoint = int(length/2)
     wpos = midpoint
     
     step_start = time.time()
@@ -338,38 +356,61 @@ def main(chrom,
                                                  wpos=wpos,
                                                  use_cuda=use_cuda)
     elif resol_model == "256Mb" :
-        outputs_ref = orca_predict.process_sequence(mchr = chrom,
-                                                    mstart = start,
-                                                    mend = start + length,
-                                                    genome = genome,
-                                                    file=None,
-                                                    custom_models=None,
-                                                    target=True,
-                                                    show_genes=True,
-                                                    show_tracks=False,
-                                                    window_radius=length/2,
-                                                    padding_chr=padding_chr,
-                                                    model_labels=None,
-                                                    use_cuda=use_cuda)
+        if fasta :
+            use_genome = giv_g
+        else :
+            use_genome = orca_predict.hg38
+        outputs_ref = orca_predict.process_region(mchr = chrom,
+                                                  mstart = start,
+                                                  mend = start + length,
+                                                  genome = use_genome,
+                                                  file=None,
+                                                  custom_models=None,
+                                                  target=True,
+                                                  show_genes=True,
+                                                  show_tracks=False,
+                                                  window_radius=length/2,
+                                                  padding_chr=padding_chr,
+                                                  model_labels=None,
+                                                  use_cuda=use_cuda)
     
     step_end = time.time()
     logging.info(f"Time taken for predictions: {step_end - step_start:.2f} seconds")
 
-
-    output_pkl = "%s.pkl" % output_prefix
+    full_path = f"{pred_path}/{output_prefix}" if pred_path else f"{output_prefix}"
+    
+    if pred_path :
+        os.makedirs(full_path)
+        
+    
+    output_pkl = f"{full_path}/pred.pkl"
+    if os.path.exists(output_pkl) :
+        os.remove(output_pkl)
+    
     file = open(output_pkl, 'wb')
     pickle.dump(outputs_ref, file)
-    dump_target_matrix(outputs_ref, output_prefix, offset, mpos, wpos, mutation, chrom, chromlen, genome)
+
+    dump_target_matrix(predict=outputs_ref, 
+                       offset=offset, 
+                       mpos=mpos, 
+                       wpos=wpos, 
+                       mutation=mutation, 
+                       chrom=chrom, 
+                       chromlen=chromlen, 
+                       genome=genome, 
+                       resol_model=resol_model, 
+                       padding_chr=padding_chr, 
+                       full_path=full_path)
 
     model_labels = ["H1-ESC", "HFF"]
-    output_prefix_file = "%s/%s" % (output_prefix, output_prefix)
+    
     genomeplot(
         outputs_ref,
         show_genes=False,
         show_tracks=False,
         show_coordinates=True,
         model_labels=model_labels,
-        file=output_prefix_file + ".pdf",
+        file=f"{full_path}/pred" + ".pdf",
         )
 
     end_time = time.time()
@@ -412,3 +453,4 @@ if __name__ == '__main__':
                         format='%(asctime)s - %(levelname)s - %(message)s')
 
     logging.info(f"Command: {' '.join(sys.argv)}")
+

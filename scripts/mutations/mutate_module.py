@@ -1,15 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import argparse
 import os
 import textwrap
 import pandas as pd
+import numpy as np
+import random
 
 from pysam import FastaFile
 from Bio import SeqIO
 
 from mutation import Mutation, Mutator
+from typing import List
 
 import logging
 import sys
@@ -41,7 +41,7 @@ def read_mutations_from_BED(mutationfile,muttype: str ="shuffle",sequence: str =
             if line.startswith("#"):
                 continue
             fields = line.strip().split()
-            name = fields[3] if len(fields)>3 else "None"
+            name = fields[3] if len(fields)>3 else f"{fields[0]}_{fields[1]}_{fields[2]}"
             strand = fields[5] if len(fields)>5 else "+"
             mutation = Mutation(fields[0], fields[1], fields[2],
                                 name, strand, muttype, sequence)
@@ -58,24 +58,65 @@ def read_mutations_from_tsv(mutationfile):
         intervals.append(mutation)
     return intervals
 
+def generate_random_mutations(mutations: List[Mutation]) -> List[Mutation]:
+    """
+    Generate random Mutator objects having the same kind of mutations as the 
+    ones specified in mutation or bed file. The length and type of the mutation  
+    are preserved but positions are random.
 
-def main(mutationfile, bed, genome, outfasta: str, mutationtype: str):
+    Parameters
+    ----------
+    - mutations : list
+        A list of Mutation objects
+    
+    Returns
+    ----------
+    A list of Mutation objects with the same type and legth of mutated sequences 
+    as in the input list but with random positions.
+    """
+    rdm_mutations = []
+    range_start = np.min([mut.start for mut in mutations])
+    range_end = np.max([mut.end for mut in mutations])
+
+    for mut in mutations :
+        length = mut.end - mut.start
+        start = random.randint(range_start, range_end - length)
+        end = start + length
+        name = f"{mut.chrom}_{start}_{end}"
+        rdm_mut = Mutation(mut.chrom, start, end, name, mut.strand, mut.op, mut.sequence)
+
+        rdm_mutations.append(rdm_mut)
+    
+    return rdm_mutations
+
+
+def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0):
     
     if bed:
         mutations = read_mutations_from_BED(bed, mutationtype)
     else:
         mutations = read_mutations_from_tsv(mutationfile)
 
-    mutator = Mutator(FastaFile(genome), mutations)
-
-    mutator.mutate()
-    seq_records = mutator.get_SeqRecords()
-    output_path = os.path.join("outputs/mutations/annotations", outfasta)
-    SeqIO.write(seq_records, output_path, "fasta")
+    mutators = {"Wtd_mut" : Mutator(FastaFile(genome), mutations)}
+    for i in range(nb_random):
+        random_mutations = generate_random_mutations(mutations)
+        mutators[f"Rdm_mut_{i}"] = Mutator(FastaFile(genome), random_mutations)
     
-    data, keys = mutator.get_trace()
-    df = pd.DataFrame(data,columns=keys)
-    df.to_csv("outputs/mutations/trace.csv", sep="\t", index=False, header=True)
+    for name, mutator in mutators.items() :
+        mutator.mutate()
+        seq_records = mutator.get_SeqRecords()
+        
+        if not os.path.exists(f"{path}/{name}"):
+            os.makedirs(f"{path}/{name}")
+        
+
+        output_path = f"{path}/{name}/sequence.fa"
+        SeqIO.write(seq_records, output_path, "fasta")
+        
+        data, keys = mutator.get_trace()
+        df = pd.DataFrame(data,columns=keys)
+        df.to_csv(f"{path}/{name}/trace_{name}.csv", 
+                sep="\t", index=False, header=True)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -84,8 +125,10 @@ def parse_arguments():
                                      '''))
     parser.add_argument('--genome',
                         required=True, help='the genome fasta file')
-    parser.add_argument('--output',
-                        required=True, help='the output fasta file')
+    parser.add_argument("--nb_rdm",
+                        required=False, type=int, default=0, help="the number of random mutations to generate")
+    parser.add_argument("--path",
+                        required=True, help="the path to the output directory to store the mutated sequences and the corresponding traces")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--bed",
                        help="the format of the mutation file is bed")
@@ -107,8 +150,9 @@ if __name__ == '__main__':
     main(mutationfile=args.mutationfile, 
          bed=args.bed, 
          genome=args.genome, 
-         outfasta=args.output, 
-         mutationtype=args.mutationtype)
+         path=args.path, 
+         mutationtype=args.mutationtype,
+         nb_random=args.nb_rdm)
     
     logging.basicConfig(filename=f"outputs/mutations/annotations/{args.output}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')

@@ -1,13 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import sys
 import random
 import re
 
+import logging
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 from collections import defaultdict
 
-from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
@@ -59,6 +61,7 @@ class Mutator():
         the specified mutations (interval + mutation type), see BedInterval class
     maximumCached: in optional
         the maximum number of cached sequences
+
     Attributes
     ----------
     handle: the pysam handle
@@ -72,7 +75,16 @@ class Mutator():
         a dictionnary storing the number of mutations for each chromosome
         trace: dict
         a dictionnary storing the data in a VCF-like format for each mutations
+
+    Configuration
+    ----------
+    The SILENCE parameter is defined in the config_mutation.py file and used to 
+    control the verbosity of the logging.
+
     """
+    # Class-level constant
+    silenced = True
+    
     def __init__(self, fasta_handle, intervals, maximumCached=1):
         self.handle = fasta_handle
         self.maximumCached = maximumCached
@@ -99,7 +111,17 @@ class Mutator():
     def modify(self, chrom, sequence):
         self.cachedSequences[chrom] = sequence
     
-    def record_trace(self,interval):
+    def record_trace(self,interval, silenced: bool = None):
+        if interval.name in self.trace[interval.chrom].keys():
+            name = interval.name
+            i=1
+            while name in self.trace[interval.chrom].keys():
+                name = f"{interval.name}_{i}"
+                i+=1
+            if (silenced is None and not self.silenced) or silenced == False :
+                logging.info(f"Mutation {interval.name} already exists, renaming to {name} ...")
+            interval.name = name
+            
         self.trace[interval.chrom][interval.name]={}
         self.trace[interval.chrom][interval.name]["start"]=interval.start
         self.trace[interval.chrom][interval.name]["end"]=interval.end
@@ -142,7 +164,7 @@ class Mutator():
         self.trace[inter.chrom][inter.name]["variant_seq"]=inverted
 
 
-    def insert(self, inter):
+    def insert(self, inter, silenced: bool = None):
         seq = self.fetch(inter.chrom)
         subseq = seq[inter.start:inter.end]
         self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
@@ -150,9 +172,16 @@ class Mutator():
             sequence = inter.sequence
         else:
             sequence = str(Seq(inter.sequence).reverse_complement())
-        if len(subseq) != len(sequence):
+
+        if len(subseq) < len(sequence):
             raise ValueError("%s %d %d  %s is not a valid insertion sequence" %
                              (inter.chrom, inter.start, inter.end, self.sequence))
+        elif len(subseq) > len(sequence):
+            if (silenced is None and not self.silenced) or silenced == False :
+                logging.info("The input sequence being shorter than the original " \
+                             "sequence, the input sequence will be repeated to fill " \
+                             "the original sequence...Proceeding")
+            sequence = seq_rep_fill(sequence, len(subseq))
         seq = replace_substring(seq, sequence, inter.start, inter.end)
         self.cachedSequences[inter.chrom] = seq
         self.trace[inter.chrom][inter.name]["variant_seq"]=sequence
@@ -261,6 +290,22 @@ def replace_substring(seq, newstring: str, start: int, end: int):
     if len(newstring) != end - start:
         raise ValueError("substring does not have the correct size")
     return seq[:start] + newstring + seq[end:]
+
+def seq_rep_fill(seq: str = "A", length: int = None):
+    """
+    Function that provides a proper filling sequence for a given length, 
+    by creating a repeatition of the input sequence (e.g. seq="ATCG" and 
+    length=10 will return "ATCGATCGAT")
+    """
+    if length is None:
+        raise ValueError("length should be specified")
+    elif length % len(seq) != 0:
+        logging.info("Length is not a multiple of the input sequence..." \
+                     "Adjusments will be made")
+        filling = seq[:length % len(seq)]
+    else:
+        filling = ""
+    return seq * (length // len(seq)) + filling
 
 
 class Mutation():
