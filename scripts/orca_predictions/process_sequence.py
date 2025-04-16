@@ -252,7 +252,7 @@ def main(chrom,
         mpos = int(length // 2)
 
     if fasta :
-        genome = os.path.splitext(os.path.basename(fasta))[0]
+        genome = os.path.basename(os.path.dirname(fasta))
         
         step_start = time.time()
         

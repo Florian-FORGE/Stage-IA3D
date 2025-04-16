@@ -1,4 +1,0 @@
-name	list_resol	base_name	path	gtype	genome	mtype
-orcarun1	"""1Mb"", 2Mb"", ""4Mb"", ""8Mb"", ""16Mb"", ""32Mb"""	orca_H_sapiens	/home/fforge/Stage-IA3D/temp_extradata/orca_H_sapiens	wt	hg38	OrcaRun
-orcarun2	"""1Mb"", 2Mb"", ""4Mb"", ""8Mb"", ""16Mb"", ""32Mb"""	test2_H_sapiens	/home/fforge/Stage-IA3D/temp_extradata/test2_H_sapiens	wt	hg38	OrcaRun
-orcarun3	"""1Mb"", 2Mb"", ""4Mb"", ""8Mb"", ""16Mb"", ""32Mb"""	offset_H_sapiens	/home/fforge/Stage-IA3D/temp_extradata/offset_H_sapiens	wt	hg38	OrcaRun

@@ -152,7 +152,7 @@ if __name__ == '__main__':
          genome=args.genome, 
          path=args.path, 
          mutationtype=args.mutationtype,
-         nb_random=args.nb_rdm)
+         nb_random=int(args.nb_rdm))
     
     logging.basicConfig(filename=f"outputs/mutations/annotations/{args.output}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')

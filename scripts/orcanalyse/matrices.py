@@ -426,6 +426,9 @@ class Matrix():
                 genome_path = f"./{self.refgenome}/sequence.fa"
             else :
                 genome_path = self.refgenome
+        
+        if genome_path.startswith("./"):
+            genome_path = genome_path[2:]
         if not os.path.isabs(genome_path):
             base_path = "/home/fforge/Stage-IA3D/notebooks/resources/genome"
             genome_path = os.path.join(base_path, genome_path)
@@ -1547,9 +1550,12 @@ class CompareMatrices():
                     ax.plot(score, regression_line, color="black", label="Regression Line")
                     
                     corr_coeff = np.corrcoef(score, score_ref)[0, 1]
-                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
-                            fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
-                                                                            facecolor="white"))
+                    
+                    SSD = np.sum((score - regression_line) ** 2)
+
+                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                            bbox=dict(boxstyle="round", facecolor="white"))
 
                     ax.set_xlabel(f"{key}'s scores")
                     ax.set_ylabel("Reference scores")
@@ -1589,11 +1595,12 @@ class CompareMatrices():
                                 color="black", label="Regression Line")
 
                         corr_coeff = np.corrcoef(score, ref)[0, 1]
-                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", 
-                                transform=ax.transAxes, fontsize=12, 
-                                verticalalignment='top', 
-                                bbox=dict(boxstyle="round", 
-                                          facecolor="white"))
+                        
+                        SSD = np.sum((score - regression_line) ** 2)
+
+                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                bbox=dict(boxstyle="round", facecolor="white"))
                         
                         ax.set_xlabel(f"{keys}'s scores")
                         ax.set_ylabel("Reference scores")
@@ -1662,9 +1669,13 @@ class CompareMatrices():
                 ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
                 
                 corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
-                ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
-                        fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
-                                                                        facecolor="white"))
+                
+                SSD = np.sum((array_comp[0] - regression_line) ** 2)
+
+                ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                        transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                        bbox=dict(boxstyle="round", facecolor="white"))
+                
                 ax.set_xlabel(f"{key}'s values")
                 ax.set_ylabel("Reference values")
                 ax.set_title(f"Scatterplot_{key}_correlation")
@@ -1718,9 +1729,13 @@ class CompareMatrices():
                     ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
                     
                     corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
-                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}", transform=ax.transAxes,
-                            fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", 
-                                                                        facecolor="white"))
+                    
+                    SSD = np.sum((array_comp[0] - regression_line) ** 2)
+
+                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                            bbox=dict(boxstyle="round", facecolor="white"))
+                    
                     ax.set_xlabel(f"{keys}'s values")
                     ax.set_ylabel("Reference values")
                     ax.set_title(f"Scatterplot_{keys}_{key}_correlation")
@@ -1733,6 +1748,43 @@ class CompareMatrices():
         else:
             plt.show()
 
+    def superposed_scatter(self, ftype: function = correl_mat, outputfile: str = None) :
+        """
+        Function that allows superposition of graphs in case there are several 
+        'Rdm_mut_{i}' (or even one) predictions with a 'Wtd_mut' prediction (one 
+        and only one).
+
+        Parameters
+        ----------
+        ftype : (function)
+            the function that produces the graphs to superpose.
+        output_file : (str)
+            the file name in which the regression(s) should be saved. If 
+            None, then it is shown without being saved.
+
+        Returns
+        ----------
+        None
+
+        Side effects
+        ----------
+        - If there is no outputfile shows the scatter plot.
+        - If there is an outputfile, saves the scatter plot in the file.
+        """
+        wtd_count = sum(any("wtd" in part.lower() for part in keys.split("_"))
+                        for keys in self.comp_dict)
+        if wtd_count != 1 :
+            raise NameError("There should be exactly one prediction associated to " \
+                            "the wanted mutation and its name should include 'wtd" \
+                            "...Exiting")
+        
+        rdm_count = sum(any("rdm" in part.lower() for part in keys.split("_"))
+                        for keys in self.comp_dict)
+        if rdm_count < 1 :
+            raise NameError("There should be at least one prediction associated to " \
+                            "a random mutation and its name should include 'rdm" \
+                            "...Exiting")
+        
 
 def build_CompareMatrices(filepathref: str, filepathcomp: str) :
     """
