@@ -6,6 +6,7 @@ import numpy as np
 import random
 
 from pysam import FastaFile
+from pyfaidx import Fasta
 from Bio import SeqIO
 
 from mutation import Mutation, Mutator
@@ -37,7 +38,11 @@ def read_mutations_from_BED(mutationfile,muttype: str ="shuffle",sequence: str =
     """ Read a .bed file and strores the associated BedInterval in a list"""
     intervals = []
     with open(mutationfile, "r") as fin:
-        for line in fin:
+        lines = [line.strip() for line in fin if not line.startswith("#")]
+        
+        sorted_lines = sorted(lines, key=lambda line: line.split()[0])
+        
+        for line in sorted_lines:
             if line.startswith("#"):
                 continue
             fields = line.strip().split()
@@ -51,14 +56,19 @@ def read_mutations_from_BED(mutationfile,muttype: str ="shuffle",sequence: str =
 def read_mutations_from_tsv(mutationfile):
     """ Read a database describing mutations and stores the needed informations in a list"""
     df = pd.read_csv(mutationfile, sep="\t", header=0, dtype={'chrom': str, 'start': int, 'end': int, 'name': str, 'strand': str, 'operation': str, 'sequence': str})
+    df_sorted = df.sort_values(by='chrom')
     intervals = []
-    for index, row in df.iterrows():
+    for _, row in df_sorted.iterrows():
         mutation = Mutation(str(row['chrom']), int(row['start']), int(row['end']), str(row['name']),
                             str(row['strand']), str(row['operation']), str(row['sequence']))
         intervals.append(mutation)
     return intervals
 
-def generate_random_mutations(mutations: List[Mutation]) -> List[Mutation]:
+def generate_random_mutations(mutations: List[Mutation], 
+                              genome: str, 
+                              rdm_seed: int = None, 
+                              boundaries: dict = None, 
+                              extend: bool = False) -> List[Mutation]:
     """
     Generate random Mutator objects having the same kind of mutations as the 
     ones specified in mutation or bed file. The length and type of the mutation  
@@ -75,12 +85,49 @@ def generate_random_mutations(mutations: List[Mutation]) -> List[Mutation]:
     as in the input list but with random positions.
     """
     rdm_mutations = []
-    range_start = np.min([mut.start for mut in mutations])
-    range_end = np.max([mut.end for mut in mutations])
 
-    for mut in mutations :
+    intervals = {}
+    chroms = []
+
+    fasta_handle = Fasta(genome)
+    
+    if rdm_seed:
+        random.seed(rdm_seed)
+
+    for i, mut in enumerate(mutations) :
+        
+        if mutations[i].chrom not in chroms :
+            chroms.append(mutations[i].chrom)
+    
+        for chrom in chroms :
+            if boundaries is not None :
+                range_start = boundaries[chrom][0]
+                range_end = boundaries[chrom][1]
+            
+            else :
+                range_start = np.min([mut.start for mut in mutations if mut.chrom==chrom])
+                range_end = np.max([mut.end for mut in mutations if mut.chrom==chrom])
+                chromlen = len(fasta_handle[chrom])
+
+                mut_range = range_end - range_start
+
+                if mut_range < 32_000_000 and extend :
+                    half_gap = (chromlen-mut_range)//2
+                    
+                    if range_start > half_gap and (chromlen - range_end) > half_gap :
+                        range_start -= half_gap
+                        range_end += half_gap
+                    
+                    elif range_start > half_gap * 2 :
+                        range_start -= half_gap * 2
+                    
+                    elif (chromlen - range_end) > half_gap * 2 :
+                        range_end += half_gap * 2
+
+        intervals[chrom] = [range_start, range_end]
+
         length = mut.end - mut.start
-        start = random.randint(range_start, range_end - length)
+        start = random.randint(intervals[chrom][0], intervals[chrom][1])
         end = start + length
         name = f"{mut.chrom}_{start}_{end}"
         rdm_mut = Mutation(mut.chrom, start, end, name, mut.strand, mut.op, mut.sequence)
@@ -90,21 +137,24 @@ def generate_random_mutations(mutations: List[Mutation]) -> List[Mutation]:
     return rdm_mutations
 
 
-def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0):
+def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0, chromosomes: list = None):
     
     if bed:
         mutations = read_mutations_from_BED(bed, mutationtype)
     else:
         mutations = read_mutations_from_tsv(mutationfile)
+    
+    fasta_handle = FastaFile(genome)
 
-    mutators = {"Wtd_mut" : Mutator(FastaFile(genome), mutations)}
+    mutators = {"Wtd_mut" : Mutator(fasta_handle, mutations)}
     for i in range(nb_random):
-        random_mutations = generate_random_mutations(mutations)
-        mutators[f"Rdm_mut_{i}"] = Mutator(FastaFile(genome), random_mutations)
+        rdm_seed = 3+i
+        random_mutations = generate_random_mutations(mutations, genome, rdm_seed)
+        mutators[f"Rdm_mut_{i}"] = Mutator(fasta_handle, random_mutations)
     
     for name, mutator in mutators.items() :
-        mutator.mutate()
-        seq_records = mutator.get_SeqRecords()
+        seq_records = mutator.mutate()
+        # seq_records = mutator.get_SeqRecords(chromosomes)
         
         if not os.path.exists(f"{path}/{name}"):
             os.makedirs(f"{path}/{name}")
@@ -129,6 +179,8 @@ def parse_arguments():
                         required=False, type=int, default=0, help="the number of random mutations to generate")
     parser.add_argument("--path",
                         required=True, help="the path to the output directory to store the mutated sequences and the corresponding traces")
+    parser.add_argument("--chromosomes",
+                        required=False, help="The list of chromosomes which should be in the produced fasta file")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--bed",
                        help="the format of the mutation file is bed")
@@ -152,9 +204,10 @@ if __name__ == '__main__':
          genome=args.genome, 
          path=args.path, 
          mutationtype=args.mutationtype,
-         nb_random=int(args.nb_rdm))
+         nb_random=int(args.nb_rdm),
+         chromosomes=args.chromosomes.split(','))
     
-    logging.basicConfig(filename=f"outputs/mutations/annotations/{args.output}_command.log", level=logging.INFO, 
+    logging.basicConfig(filename=f"{args.path}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')
 
     logging.info(f"Command: {' '.join(sys.argv)}")

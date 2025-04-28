@@ -12,7 +12,7 @@ import numpy as np
 
 import pandas as pd
 import os
-from typing import Dict, Union
+from typing import Dict, Union, Callable, NamedTuple
 from collections import ChainMap
 
 from matplotlib import figure, axes
@@ -31,7 +31,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX, TLVs_HEATMAP
+from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX, TLVs_HEATMAP, SUPERPOSED_PARAMETERS
 
 
 """
@@ -39,7 +39,7 @@ Analyse of contact matrices and their scores (insulation and PC1 for the count
 matrix, insulation for the correlation matrix) for observed (RealMatrix) and 
 predicted (OrcaMatrix) matrices. It is possible to compare those scores using
 CompareMatrices objects (and their methods), and even for multiple resolutions
-by using OrcaRun objects.
+by using MatrixView objects.
 
 The first line in an Orca matrix file should contain metadata in the following 
 format:
@@ -102,7 +102,7 @@ def load_attributes_orca_matrix(orcapredfile, normmatfile):
 
     return region, resolution, orcapred, normmat, genome
 
-def load_coolmat(coolfilepath: str, 
+def load_coolmat(coolpath: str, 
                  region: list, 
                  resolution: str, 
                  rebinned: bool = False):
@@ -113,19 +113,19 @@ def load_coolmat(coolfilepath: str,
     and that passed through the adaptive_coarsegrain() function from cooltools.
 
     Parameters:
-        - coolfilepath (str) : the file path (e.g. "PATH/TO/file.mcool") 
+        - coolpath (str) : the file path (e.g. "PATH/TO/file.mcool") 
         - region (list) : the list as follow [chrom: str, start: int, end: int] 
             (e.g. ["9", 0, 32_000_000])
         - resolution (str) : the resolution as in the orca predictions format 
           (e.g. "32Mb")
         - rebinned (bool) : if True then the adaptive_coarsegrain() function from 
-          cooltools is used (it is also used if the coolfilepath is as follow 
+          cooltools is used (it is also used if the coolpath is as follow 
           'PATH/TO/file.rebinned.mcool'). Else the raw matrix is returned.
     """
     resol = int(resolution.replace('Mb', '_000_000'))
     resol/=250
 
-    coolres = "%s::resolutions/%d" % (coolfilepath, resol)
+    coolres = "%s::resolutions/%d" % (coolpath, resol)
     clr = cooler.Cooler(coolres)
     
     if not region[0].startswith('chr'):
@@ -133,7 +133,7 @@ def load_coolmat(coolfilepath: str,
     
     coolmat = clr.matrix(balance=False).fetch(region)
     
-    if "rebinned" in coolfilepath.split(".") or rebinned == True:
+    if "rebinned" in coolpath.split(".") or rebinned == True:
         mat_balanced = clr.matrix(balance=True).fetch(region)
         coolmat = adaptive_coarsegrain(mat_balanced, coolmat, max_levels = 12) 
     
@@ -239,6 +239,8 @@ class Matrix():
         
     Attributes
     ----------
+    - references : list
+        a list containing [chrom, start, end, resolution].
     - _obs_o_exp: np.ndarray
         the observed over expected matrix (log(obs/exp)).
     - _expect : np.ndarray
@@ -254,8 +256,6 @@ class Matrix():
                                                                         
     Additionary attributes
     ----------
-    - references : list
-        a list containing [chrom, start, end, resolution].
     - available_scores : dict
         a dictionary constructed with types of scores possible as keys,
         and the list of corresponding values as value.
@@ -300,9 +300,11 @@ class Matrix():
         return WHICH_MATRIX[cls.__name__][mtype]
 
 
-    def __init__(self, region: list, resolution: str, gtype: str = "wt"):
+    def __init__(self, region: list, resolution: str, genome: str, gtype: str = "wt"):
         self.region = region
         self.resolution = resolution
+        self.references = region + [resolution]
+        self.genome = genome
         self.gtype = gtype
         self._obs_o_exp = None
         self._obs = None
@@ -311,13 +313,6 @@ class Matrix():
         self._insulation_correl = None
         self._PC1 = None
                 
-    
-    @property
-    def references(self):
-        info = [value for value in self.region]
-        info.append(self.resolution)
-        return info
-    
     
     def _get_insulation_score(self,
                               w: int = 5, 
@@ -423,7 +418,10 @@ class Matrix():
         
         if genome_path is None :
             if not os.path.isabs(self.refgenome):
-                genome_path = f"./{self.refgenome}/sequence.fa"
+                if not self.refgenome.split('/')[-1] == "sequence" :
+                    genome_path = f"./{self.refgenome}/sequence.fa"
+                else :
+                    genome_path = f"./{self.refgenome}"
             else :
                 genome_path = self.refgenome
         
@@ -773,7 +771,7 @@ class OrcaMatrix(Matrix):
         self.refgenome = refgenome
         self.region, self.resolution, self.orcapred, self.normmat, self.genome \
                     = load_attributes_orca_matrix(orcapredfile, normmatfile)
-        super().__init__(self.region, self.resolution, self.gtype)
+        super().__init__(self.region, self.resolution, self.genome, self.gtype)
         
     
     @property
@@ -831,10 +829,10 @@ class RealMatrix(Matrix):
     - gtype : str
         the type of the genotype studied : wildtype ("wt") or a 
         mutated variant ("mut").
-    - coolfilepath : str
+    - coolpath : str
         the coolfile from which the matrix is extracted
     - rebinned (bool) : if True then the adaptive_coarsegrain() function from 
-        cooltools is used (it is also used if the coolfilepath is as follow 
+        cooltools is used (it is also used if the coolpath is as follow 
         'PATH/TO/file.rebinned.mcool'). Else the raw matrix is returned.
     
     Attributes
@@ -874,15 +872,16 @@ class RealMatrix(Matrix):
                  region: list, 
                  resolution: str, 
                  gtype: str,
-                 coolfilepath: str,
+                 coolpath: str,
                  rebinned: str,
-                 genome: str):
-        super().__init__(region, resolution, gtype)
-        self.coolmat = load_coolmat(coolfilepath, region, resolution, rebinned)
-        self.coolfilepath = coolfilepath
+                 genome: str,
+                 refgenome: str):
+        super().__init__(region, resolution, genome, gtype)
+        self.coolmat = load_coolmat(coolpath, region, resolution, rebinned)
+        self.coolpath = coolpath
         self._log_obs_o_exp = None
         self.genome = genome
-        self.refgenome = genome
+        self.refgenome = refgenome
 
     @property
     def obs(self):
@@ -940,24 +939,35 @@ class RealMatrix(Matrix):
 
 
 
-class OrcaRun():
+class MatrixView():
     """
-    Class associated with a given orca run (predicted matrices for different
-    resolutions --presumably 6 as follow : 1Mb, 2Mb, 4Mb, 8Mb, 16Mb, 32Mb--). 
-    Consequently an object of this class is a dictionary which keys are the 
-    resolutions and values are the corresponding OrcaMatrix objects.
+    Class associated with a dictionary which keys are the resolutions 
+    and values are the corresponding Matrix objects. Hence it stores 
+    data from the same region at different resolutions (presumably 6 
+    as follow : 1Mb, 2Mb, 4Mb, 8Mb, 16Mb, 32Mb).
     
     Parameters
     ----------
     di : dict
         a dictionary which keys are the resolution of the Matrix objects 
         associated to these keys.
-    """
-    def __init__(self, di: Dict[str, OrcaMatrix]):
+    """    
+    def __init__(self, di: Dict[str, Matrix]):
         self.di = di
         self.region = {key: value.region for key, value in di.items()}
         self.references = {key: value.references for key, value in di.items()}
         self.prefixes = [value.prefix for _, value in di.items()]
+        self._refgenome = None
+    
+    @property
+    def refgenome(self):
+        if self._refgenome is None :
+            first_mat = next(iter(self.di.values()))
+            if any(getattr(mat, "refgenome") != getattr(first_mat, "refgenome") for mat in self.di) :
+                raise ValueError("All matrices should share the same reference genome" \
+                                 "...Exiting.")
+            self._refgenome = getattr(first_mat, "refgenome")
+        return self._refgenome
 
     def _save_scores_(self, 
                       output_scores: str, 
@@ -1007,6 +1017,7 @@ class OrcaRun():
 
 
 
+
 def extract_resol_asc(path: str) -> list:
     df = pd.read_csv(f"{path}/pred.log", 
                                    sep='\t', 
@@ -1017,41 +1028,59 @@ def extract_resol_asc(path: str) -> list:
     return list_resolutions_asc
 
 
-def build_OrcaRun(path: str,
-                  refgenome: str, 
-                  gtype: str = "wt") -> OrcaRun:
+def build_MatrixView(mtype: str,
+                     list_resolutions: list,
+                     refgenome: str, 
+                     gtype: str = "wt",
+                     **kwargs) -> MatrixView :
     """
-    Builder for Orcarun objects using a list of resolutions, a path, a base name and a 
-    gtype. It is supposed that the base name is shared by all the files of the orca run.
+    Builder for MatrixView objects using a list of resolutions, a reference genome, a  
+    genotype and all the necessary arguments depending on the matrix type specified. 
+    It is supposed that all the files of the orca run are named 'pred_###_resol.txt' 
+    with '###' being either 'predictions' or 'normmats'.
     
     Parameters
     ----------
-    - path : str
-        the path to the files (all the necessary files --orca predictions and
-        normmats-- should be gathered in the same folder).
-    - base_name : str
-        the base_name shared by all the files (e.g. 'orca_' for 
-        'orca_predictions_1Mb.txt', 'orca_normmats_8Mb.txt', 
-        'orca_normmats_32Mb.txt'). It is necessary for this module that the 
-        files are named in this manner.
+    - mtype : str
+        the type of Matrix objects to use in the MatrixView.
+    -list_resol : list
+        the list of resolutions for which the mtype objects should be created.
+    - refgenome : str
+        the reference genome for all of the mtype objects created.
     - gtype : str
         the type of the genotype studied : wildtype ("wt") or a 
         mutated variant ("mut").
+    - kwargs : any
+        every arguments needed to construct the mtype objects (if mtype = 'RealMatrix' 
+        there should be : region = {'resol1' : [chr, start_1, end_1], 'resol2' : 
+        [chr, strat_2, end_2], ...} as an argument, for the other arguments, only one 
+        value is expected)
     
     Returns
     ----------
-    An OrcaRun object.
+    A MatrixView object.
     """
     di = {}
     
-    list_resolutions_asc = extract_resol_asc(path)
+    if mtype == "OrcaMatrix" :
+        path = kwargs["path"]
 
-    for value in list_resolutions_asc :
-        di[value] = OrcaMatrix(orcapredfile=f"{path}/pred_predictions_{value}.txt", 
-                                normmatfile=f"{path}/pred_normmats_{value}.txt", 
-                                gtype=gtype,
-                                refgenome=refgenome)
-    return OrcaRun(di)
+        for resol in list_resolutions :
+            di[resol] = OrcaMatrix(orcapredfile=f"{path}/pred_predictions_{resol}.txt", 
+                                    normmatfile=f"{path}/pred_normmats_{resol}.txt", 
+                                    gtype=gtype,
+                                    refgenome=refgenome)
+    elif mtype == "RealMatrix" :
+        for resol in list_resolutions :
+            di[resol] = RealMatrix(region = kwargs["region"][resol],
+                                   resolution = resol,
+                                   gtype = gtype,
+                                   coolpath = kwargs["coolpath"],
+                                   rebinned=kwargs["rebinned"],
+                                   genome=kwargs["genome"],
+                                   refgenome=refgenome) 
+    
+    return MatrixView(di)
 
 
 
@@ -1059,9 +1088,9 @@ def build_OrcaRun(path: str,
 class CompareMatrices():
     """
     Class associated to a pair of objects : a reference and a dictionary of
-    objects to compare to it. If the reference is an OrcaRun object therefore 
-    the objects in the dictionary should be OrcaRun objects. Nonetheless, it is
-    possible to have a dictionary of OrcaRun objects to compare to a reference 
+    objects to compare to it. If the reference is an MatrixView object therefore 
+    the objects in the dictionary should be MatrixView objects. Nonetheless, it is
+    possible to have a dictionary of MatrixView objects to compare to a reference 
     being a dictionary of RealMatrix objects.
     This class enables simple comparison by viewing the associated heatmaps and 
     plots of different scores (insulation and PC1 for the count matrix, insulation 
@@ -1070,9 +1099,9 @@ class CompareMatrices():
     
     Parameters
     ----------
-    - ref : Matrix | OrcaRun | dict{"resol": RealMatrix}
-        the reference Matrix object or reference OrcaRun object
-    - comp : dict{"name": Matrix} | dict{"name": OrcaRun}
+    - ref : Matrix | MatrixView 
+        the reference Matrix object or reference MatrixView object
+    - comp : dict{"name": Matrix} | dict{"name": MatrixView}
         a dictionary of Matrix objects which keys are names
 
     Attributes
@@ -1082,9 +1111,9 @@ class CompareMatrices():
     - resolution: str 
         the resolution of the matrix (it is supposed that both matrices 
         have the same resolution ; If not, issues may arise).
-    - ref : Matrix | OrcaRun | dict{"resol": RealMatrix}
-        the reference matrix object or reference OrcaRun object
-    - comp : dict{"name": Matrix} | dict{"name": OrcaRun}
+    - ref : Matrix | MatrixView 
+        the reference matrix object or reference MatrixView object
+    - comp : dict{"name": Matrix} | dict{"name": MatrixView}
         a dictionary of Matrix objects which keys are names
     - same_ref : Bool
         By default same_ref = True, but if the references of the two matrices
@@ -1100,58 +1129,38 @@ class CompareMatrices():
     """
 
     def __init__(self, 
-                 ref: Union[Matrix, OrcaRun, Dict[str, RealMatrix]],
-                 comp_dict: Union[Dict[str, Matrix], Dict[str, OrcaRun]]) :
+                 ref: Union[Matrix, MatrixView],
+                 comp_dict: Union[Dict[str, Matrix], Dict[str, MatrixView]]) :
 
         self.ref = ref
         self.comp_dict = comp_dict
 
 
-        if (isinstance(ref, Matrix) and all(isinstance(value, OrcaRun) 
+        if (isinstance(ref, Matrix) and any(isinstance(value, MatrixView) 
                                             for value in self.comp_dict.values())) \
-            or (isinstance(ref, OrcaRun) and all(isinstance(value, Matrix) 
+            or (isinstance(ref, MatrixView) and any(isinstance(value, Matrix) 
                                                  for value in self.comp_dict.values())) : 
             raise TypeError("Compatibility issue ! Comparison between Matrix"
-                            "and OrcaRun objects is not supported")
+                            "and MatrixView objects is not supported")
         
-        if isinstance(ref, RealMatrix) :
+        if isinstance(ref, Matrix) :
             self.region_ref = ref.region
             self.resolution_ref = ref.resolution
-        elif isinstance(ref, OrcaRun) :
+        elif isinstance(ref, MatrixView) :
             self.region_ref = ref.region
             self.resolution_ref = [key for key in ref.di]
-        else :
-            self.region_ref = next(iter(comp_dict.values())).region
-            self.resolution_ref = [key for key in ref]
+        
         
         self.same_ref = True
         
         for key, obj in comp_dict.items():
-            if isinstance(ref, OrcaRun) :
-                if hasattr(ref, "references") and hasattr(obj, "references"):
-                    if ref.references != obj.references:
-                        logging.info(f"The {key} object does not have the same references as "
-                                     f"the Reference. Compatibility issues may occur. \n "
-                                     f"{ref.references} \n {obj.references}")
-                        self.same_ref = False
-            elif isinstance(ref, Matrix) :
-                if hasattr(ref, "references") and hasattr(obj, "references"):
-                    if ref.references != obj.references:
-                        logging.info(f"The {key} object does not have the same references as "
-                                     f"the Reference. Compatibility issues may occur. \n " 
-                                     f"{ref.references} \n {obj.references}")
-                        self.same_ref = False
-            elif isinstance(ref, dict) :
-                for resol, matrix in ref.items() :
-                    if resol in obj.di.keys() :
-                        if hasattr(matrix, "references") and hasattr(obj.di[resol], "references"):
-                            if matrix.references != obj.di[resol].references:
-                                logging.info(f"The {key} object does not have the same references as "
-                                             f"the Reference. Compatibility issues may occur. \n " 
-                                             f"{ref.references} \n {obj.references}")
-                                self.same_ref = False
-                    else : 
-                        raise KeyError(f"The {resol} key is not in the reference dictionary.")
+            if hasattr(ref, "references") and hasattr(obj, "references"):
+                if ref.references != obj.references:
+                    logging.info(f"The {key} object does not have the same references as "
+                                    f"the Reference. Compatibility issues may occur. \n "
+                                    f"{ref.references} \n {obj.references}")
+                    self.same_ref = False
+            
             else:
                 logging.warning(f"The {key} object or the Reference does not have a 'references' "
                                 f"attribute, or do not have compatible types for supported "
@@ -1174,7 +1183,7 @@ class CompareMatrices():
                  genome_path: str =None):
         """
         Function that produces the heatmaps corresponding to each Matrix object
-        or OrcaRun object and either plot it or save it depending if an output_file 
+        or MatrixView object and either plot it or save it depending if an output_file 
         is given.
 
         Parameters : 
@@ -1207,23 +1216,12 @@ class CompareMatrices():
                 i+=1
 
         else :
-            if isinstance(self.ref, OrcaRun) :
-                gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref.di))
-                f = plt.figure(clear=True, figsize=(20*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
-                
-                self.ref._heatmaps(gs=gs, f=f, i=0, show=False, name="Reference", 
-                                   compartment=compartment, genome_path=genome_path)
+            gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref.di))
+            f = plt.figure(clear=True, figsize=(20*(len(self.ref.di)+1), 20*(len(self.comp_dict)+1)))
             
-            else :
-                gs = GridSpec(nrows=len(self.comp_dict)+1, ncols=len(self.ref))
-                f = plt.figure(clear=True, figsize=(20*(len(self.ref)+1), 20*(len(self.comp_dict)+1)))
-                
-                j=0
-                for key, value in self.ref.items() :
-                    value.heatmap(gs=gs, f=f, i=0, j=j, name="Reference", show=False, 
-                                  compartment=compartment, genome_path=genome_path)
-                    j+=1
-
+            self.ref._heatmaps(gs=gs, f=f, i=0, show=False, name="Reference", 
+                                compartment=compartment, genome_path=genome_path)
+            
             i=1
             for key, matrix in self.comp_dict.items():
                 if names == None :
@@ -1301,33 +1299,21 @@ class CompareMatrices():
                 j+=1
         
         else :
-            if isinstance(self.ref, OrcaRun) :
-                if not prefixes :
-                    prefixes= [[f"Reference_{key}" for key in self.ref.di]]
-                
-                self.ref._save_scores_(output_scores=output_scores, 
-                                    list_scores_types=list_scores_types,
-                                    prefixes=prefixes[0])
-            else :
-                if not prefixes :
-                    prefixes= [[f"Reference_{key}" for key in self.ref]]
-                
-                i=0
-                for key, value in self.ref.items():
-                    value._save_scores(output_scores=output_scores, 
-                                       list_scores_types=list_scores_types, 
-                                       prefix=prefixes[0][i])
-            i+=1
+            if not prefixes :
+                prefixes= [[f"Reference_{key}" for key in self.ref.di]]
             
-
+            self.ref._save_scores_(output_scores=output_scores, 
+                                   list_scores_types=list_scores_types,
+                                   prefixes=prefixes[0])
+           
             j=1
             for name, obj in self.comp_dict.items():
                 if len(prefixes) <= j :
                     prefixes.append([f"{name}_{key}" for key in obj.di])
                 
                 obj._save_scores_(output_scores=output_scores, 
-                                    list_scores_types=list_scores_types,
-                                    prefixes=prefixes[j])
+                                  list_scores_types=list_scores_types,
+                                  prefixes=prefixes[j])
                 j+=1
         
 
@@ -1395,7 +1381,7 @@ class CompareMatrices():
                 f = plt.figure(clear=True, figsize=(20, 22*(len(self.comp_dict)+1)))
                 
                 # Heatmap_ref
-                self.ref.heatmap(gs=gs, f=f, i=0, j=j, show=False, name="Reference", 
+                self.ref.heatmap(gs=gs, f=f, i=0, j=0, show=False, name="Reference", 
                                  compartment=compartment)
                                     
                 # Scores_ref
@@ -1406,12 +1392,12 @@ class CompareMatrices():
                                         title ="%s_ref" % score_type, 
                                         score_type=score_type, 
                                         i=i+1, 
-                                        j=j)
+                                        j=0)
                 
                 rep=1
                 for key, value in self.comp_dict.items():
                     # Heatmap_comp
-                    value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep, j=j, show=False, name=f"{key}", 
+                    value.heatmap(gs=gs, f=f, i=(nb_scores + 1) * rep, j=0, show=False, name=f"{key}", 
                                   compartment=compartment)
 
                     # Scores_comp
@@ -1422,50 +1408,26 @@ class CompareMatrices():
                                             title =f"{score_type}_{key}", 
                                             score_type=score_type, 
                                             i=(nb_scores + 1) * rep + i+1, 
-                                            j=j)
+                                            j=0)
                     rep+=1
             
             else:
-                if isinstance(self.ref, OrcaRun) :
-                    gs = GridSpec(nrows=nb_graphs, ncols=len(self.ref.di), height_ratios=ratios)
-                    f = plt.figure(clear=True, figsize=(20*len(self.ref.di), 22*(len(self.comp_dict)+1)))
-                    
-                    # Heatmap_ref
-                    self.ref._heatmaps(gs=gs, f=f, i=0, j=0, show=False, name="Reference", 
-                                       compartment=compartment)
-                                        
-                    # Scores_ref
-                    for i in range(nb_scores) :
-                        score_type = list_scores_types[i]
-                        self.ref._score_plot_(gs=gs, 
-                                            f=f, 
-                                            title ="%s_ref" % score_type, 
-                                            score_type=score_type, 
-                                            i=i+1, 
-                                            j=0)
-                else :
-                    gs = GridSpec(nrows=nb_graphs, ncols=len(self.ref), height_ratios=ratios)
-                    f = plt.figure(clear=True, figsize=(20*len(self.ref), 22*(len(self.comp_dict)+1)))
-                    
-                    # Heatmap_ref
-                    j=0
-                    for _, value in self.ref.items() :
-                        value.heatmap(gs=gs, f=f, i=0, j=j, name="Reference", show=False, 
-                                      compartment=compartment)
-                        j+=1
-                                        
-                    # Scores_ref
-                    j=0
-                    for _, value in self.ref.items() :
-                        for i in range(nb_scores) :
-                            score_type = list_scores_types[i]
-                            value._score_plot(gs=gs, 
-                                                f=f, 
-                                                title ="%s_ref" % score_type, 
-                                                score_type=score_type, 
-                                                i=i+1, 
-                                                j=j)
-                        j+=1
+                gs = GridSpec(nrows=nb_graphs, ncols=len(self.ref.di), height_ratios=ratios)
+                f = plt.figure(clear=True, figsize=(20*len(self.ref.di), 22*(len(self.comp_dict)+1)))
+                
+                # Heatmap_ref
+                self.ref._heatmaps(gs=gs, f=f, i=0, j=0, show=False, name="Reference", 
+                                   compartment=compartment)
+                                    
+                # Scores_ref
+                for i in range(nb_scores) :
+                    score_type = list_scores_types[i]
+                    self.ref._score_plot_(gs=gs, 
+                                          f=f, 
+                                          title ="%s_ref" % score_type, 
+                                          score_type=score_type, 
+                                          i=i+1, 
+                                          j=0)
                 
                 rep=1
                 for key, value in self.comp_dict.items():
@@ -1495,7 +1457,8 @@ class CompareMatrices():
 
     def scores_regression(self,
                           output_file: str = None,
-                          score_type: str = "insulation_count"):
+                          score_type: str = "insulation_count",
+                          superposed: bool = False):
         """
         Method that produces regression for one kind of score and by 
         comparing the values of each matrix in the comp_dict to the 
@@ -1538,36 +1501,49 @@ class CompareMatrices():
 
                 gs = GridSpec(nrows=len(score_comp), ncols=1)
                 f = plt.figure(clear=True, figsize=(10, 10*(len(score_comp))))
+                ax = f.add_subplot(gs[0, 0])
+
+                alpha, step = 1, 1
+                if superposed :
+                    sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
+                    _alpha, step = sup_param["alpha"], sup_param["step"]
 
                 i=0
                 for key, score in score_comp.items() :
-                    ax = f.add_subplot(gs[i, 0])
-                    ax.scatter(score, score_ref, c=COLOR_CHART[score_type])
+                    if not superposed and i >= 1:
+                        ax = f.add_subplot(gs[i, 0])
+                    
+                    if superposed :
+                        if "wtd" in [part.lower() for part in key.split("_")] :
+                            alpha = _alpha["wtd"]
+                        elif "rdm" in [part.lower() for part in key.split("_")] :
+                             alpha = _alpha["rdm"]
+
+                    ax.scatter(score, score_ref, c=COLOR_CHART[score_type], alpha=alpha)
 
                     slope, intercept, _, _, _ = linregress(score, score_ref)
                     regression_line = slope * score + intercept
-
-                    ax.plot(score, regression_line, color="black", label="Regression Line")
-                    
+                
                     corr_coeff = np.corrcoef(score, score_ref)[0, 1]
-                    
+                
                     SSD = np.sum((score - regression_line) ** 2)
 
-                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
-                            transform=ax.transAxes, fontsize=12, verticalalignment='top',
-                            bbox=dict(boxstyle="round", facecolor="white"))
+                    if i >= 1 or not superposed : 
+                        ax.plot(score, regression_line, color="black", label="Regression Line")
+                    
+                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                bbox=dict(boxstyle="round", facecolor="white"))
 
                     ax.set_xlabel(f"{key}'s scores")
                     ax.set_ylabel("Reference scores")
                     ax.set_title(f"Scatterplot_{key}_{score_type}")
+                    
+                    i+=step
             
             else :
-                if isinstance(self.ref, OrcaRun) :
-                    score_ref = {key: get_property(mat, score_type) 
-                                 for key, mat in self.ref.di.items()}
-                else :
-                    score_ref = {key: get_property(mat, score_type) 
-                                 for key, mat in self.ref.items()}
+                score_ref = {key: get_property(mat, score_type) 
+                                    for key, mat in self.ref.di.items()}
                 
                 score_comp = {keys: {key: get_property(orcamat, score_type) 
                                     for key, orcamat in run.di.items()} 
@@ -1577,36 +1553,55 @@ class CompareMatrices():
                 f = plt.figure(clear=True, 
                                figsize=(10*len(score_ref), 20*(len(score_comp))))
                 
+                ax = f.add_subplot(gs[0, 0])
+
+                alpha, step = 1, 1
+                if superposed :
+                    sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
+                    _alpha, step = sup_param["alpha"], sup_param["step"]
+                
                 i=0
                 for keys in score_comp :
                     j=0
                     for key in score_ref :
-                        ax = f.add_subplot(gs[i, j])
+                        if i==0 :
+                            ax = f.add_subplot(gs[i, j])
+                        if not superposed and i >= 1 :
+                            ax = f.add_subplot(gs[i, j])
+                        elif superposed and i>=1 :
+                            ax = f.axes[0, j]
+                                                
+                        if superposed :
+                            if "wtd" in [part.lower() for part in key.split("_")] :
+                                alpha = _alpha["wtd"]
+                            elif "rdm" in [part.lower() for part in key.split("_")] :
+                                alpha = _alpha["rdm"]
                         
                         score = np.array(score_comp[keys][key])
                         ref = np.array(score_ref[key])
 
-                        ax.scatter(score, ref, c=COLOR_CHART[score_type])
+                        ax.scatter(score, ref, c=COLOR_CHART[score_type], alpha=alpha)
                         
                         slope, intercept, _, _, _ = linregress(score, ref)
                         regression_line = slope * score + intercept
-
-                        ax.plot(score, regression_line, 
-                                color="black", label="Regression Line")
 
                         corr_coeff = np.corrcoef(score, ref)[0, 1]
                         
                         SSD = np.sum((score - regression_line) ** 2)
 
-                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
-                                transform=ax.transAxes, fontsize=12, verticalalignment='top',
-                                bbox=dict(boxstyle="round", facecolor="white"))
+                        if i >= 1 or not superposed :
+                            ax.plot(score, regression_line, 
+                                    color="black", label="Regression Line")
+
+                            ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                    transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                    bbox=dict(boxstyle="round", facecolor="white"))
                         
                         ax.set_xlabel(f"{keys}'s scores")
                         ax.set_ylabel("Reference scores")
                         ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
                         j+=1
-                    i+=1
+                    i+=step
                 
             if output_file: 
                 plt.savefig(output_file, transparent=True)
@@ -1614,7 +1609,7 @@ class CompareMatrices():
                 plt.show()
 
 
-    def correl_mat(self, outputfile: str = None) :
+    def correl_mat(self, outputfile: str = None, superposed: bool = False) :
         """
         Method that compares each value of each matrix in the comp_dict 
         to the corresponding value in the reference matrix or matrices. 
@@ -1655,42 +1650,54 @@ class CompareMatrices():
             gs = GridSpec(nrows=len(comp), ncols=1)
             f = plt.figure(clear=True, figsize=(10, 10*(len(comp))))
 
+            ax = f.add_subplot(gs[0, 0])
+
+            alpha, step = 1, 1
+            if superposed :
+                sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
+                _alpha, step = sup_param["alpha"], sup_param["step"]
+
             i=0
             for key, values in comp.items() :
                 array_comp = np.array([values, ref])
                 array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
 
-                ax = f.add_subplot(gs[i, 0])
-                ax.scatter(array_comp[0], array_comp[1], c="black")
+                if not superposed and i >= 1:
+                    ax = f.add_subplot(gs[i, 0])
+                    
+                if superposed :
+                    if "wtd" in [part.lower() for part in key.split("_")] :
+                        alpha = _alpha["wtd"]
+                    elif "rdm" in [part.lower() for part in key.split("_")] :
+                            alpha = _alpha["rdm"]
+
+                ax.scatter(array_comp[0], array_comp[1], c="black", alpha=alpha)
                 
                 slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
                 regression_line = slope * array_comp[0] + intercept
 
-                ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
-                
                 corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
                 
                 SSD = np.sum((array_comp[0] - regression_line) ** 2)
 
-                ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
-                        transform=ax.transAxes, fontsize=12, verticalalignment='top',
-                        bbox=dict(boxstyle="round", facecolor="white"))
+                if i >= 1 or not superposed :
+                    ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
+                
+                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                            bbox=dict(boxstyle="round", facecolor="white"))
                 
                 ax.set_xlabel(f"{key}'s values")
                 ax.set_ylabel("Reference values")
                 ax.set_title(f"Scatterplot_{key}_correlation")
                 ax.legend()
-                i+=1
+                i+=step
             
         else :
-            if isinstance(self.ref, OrcaRun) :
+            if isinstance(self.ref, MatrixView) :
                 ref = {key: mat.obs_o_exp.flatten()
                              for key, mat in self.ref.di.items()}
                 ref_sigma = indic["val"]["OrcaMatrix"]
-            else :
-                ref = {key: mat.log_obs_o_exp.flatten()
-                             for key, mat in self.ref.items()}
-                ref_sigma = indic["val"]["RealMatrix"]
             
             comp = {keys: {key: {"values" :mat.obs_o_exp.flatten(), 
                                  "sigma" : indic["val"][mat.__class__.__name__]}
@@ -1700,6 +1707,11 @@ class CompareMatrices():
             gs = GridSpec(nrows=len(comp), ncols=len(ref))
             f = plt.figure(clear=True, 
                            figsize=(10*len(ref), 20*(len(comp))))
+            
+            alpha, step = 1, 1
+            if superposed :
+                sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
+                _alpha, step = sup_param["alpha"], sup_param["step"]
             
             i=0
             for keys in comp :
@@ -1717,38 +1729,51 @@ class CompareMatrices():
                     array_comp = np.array([values, ref_val])
                     array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
                     
-                    
-                    ax = f.add_subplot(gs[i, j])
+                    if i==0 :
+                        ax = f.add_subplot(gs[i, j])
+                    if not superposed and i >= 1 :
+                        ax = f.add_subplot(gs[i, j])
+                    elif superposed and i>=1 :
+                        ax = f.axes[0, j]
+                                                                
+                    if superposed :
+                        if "wtd" in [part.lower() for part in key.split("_")] :
+                            alpha = _alpha["wtd"]
+                        elif "rdm" in [part.lower() for part in key.split("_")] :
+                            alpha = _alpha["rdm"]
+                                       
                     ax.scatter(array_comp[0], 
                                array_comp[1], 
-                               c="black")
+                               c="black",
+                               alpha=alpha)
                     
                     slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
                     regression_line = slope * array_comp[0] + intercept
 
-                    ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
-                    
                     corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
                     
                     SSD = np.sum((array_comp[0] - regression_line) ** 2)
 
-                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
-                            transform=ax.transAxes, fontsize=12, verticalalignment='top',
-                            bbox=dict(boxstyle="round", facecolor="white"))
+                    if i >= 1 or not superposed :
+                        ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
+                    
+                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                bbox=dict(boxstyle="round", facecolor="white"))
                     
                     ax.set_xlabel(f"{keys}'s values")
                     ax.set_ylabel("Reference values")
                     ax.set_title(f"Scatterplot_{keys}_{key}_correlation")
                     ax.legend()
                     j+=1
-                i+=1
+                i+=step
 
         if outputfile: 
             plt.savefig(outputfile)
         else:
             plt.show()
 
-    def superposed_scatter(self, ftype: function = correl_mat, outputfile: str = None) :
+    def superposed_scatter(self, ftype: Callable = correl_mat, **kwargs) :
         """
         Function that allows superposition of graphs in case there are several 
         'Rdm_mut_{i}' (or even one) predictions with a 'Wtd_mut' prediction (one 
@@ -1758,10 +1783,10 @@ class CompareMatrices():
         ----------
         ftype : (function)
             the function that produces the graphs to superpose.
-        output_file : (str)
-            the file name in which the regression(s) should be saved. If 
-            None, then it is shown without being saved.
-
+        kwargs : (dict)
+            the dictionary composed of the parameters needed for the function 
+            execution realted to the parameters'name as key.
+        
         Returns
         ----------
         None
@@ -1774,6 +1799,7 @@ class CompareMatrices():
         wtd_count = sum(any("wtd" in part.lower() for part in keys.split("_"))
                         for keys in self.comp_dict)
         if wtd_count != 1 :
+            print(wtd_count)
             raise NameError("There should be exactly one prediction associated to " \
                             "the wanted mutation and its name should include 'wtd" \
                             "...Exiting")
@@ -1781,10 +1807,102 @@ class CompareMatrices():
         rdm_count = sum(any("rdm" in part.lower() for part in keys.split("_"))
                         for keys in self.comp_dict)
         if rdm_count < 1 :
+            print(rdm_count)
             raise NameError("There should be at least one prediction associated to " \
                             "a random mutation and its name should include 'rdm" \
                             "...Exiting")
         
+        err_count = sum(all("rdm" not in part.lower() 
+                            and "wtd" not in part.lower() 
+                                    for part in keys.split("_"))
+                                            for keys in self.comp_dict)
+        if err_count != 0 :
+            print(err_count)
+            raise NameError("There should not be any prediction without a 'rdm' or " \
+                            "'wtd' indicator in its name...Exiting")
+        
+        if ftype.__name__ == "correl_mat" :
+            if kwargs["outputfile"] :
+                outputfile = kwargs["outputfile"]
+            else :
+                outputfile = None
+            superposed = True
+            ftype(self, outputfile, superposed)
+        
+        elif ftype.__name__ == "scores_regression" :
+            if kwargs["outputfile"] :
+                outputfile = kwargs["outputfile"]
+            else :
+                outputfile = None
+            if kwargs["score_type"] :
+                score_type = kwargs["score_type"]
+            else :
+                score_type = "insulation_count"
+            superposed = True
+            ftype(self, outputfile, score_type, superposed)
+        
+
+
+
+def _build_MatrixView_(row: NamedTuple, 
+                       regions: dict = None,
+                       list_resol: list = [f"{r}Mb" for r in [1, 2, 4, 8, 16, 32]]
+                       ) -> MatrixView :
+    """
+    Builder for MatrixView objects using a row from a .csv file containing the data needed 
+    to construct the Matrix (and preferably children classes) objects that are part of 
+    the MatrixView. A dictionary of regions and a list of resolutions can be specified if 
+    they are not in the row.
+
+    Parameters:
+        - row : (NamedTuple)
+            a row as obtained through using itertuples() on a DataFrame.
+        - regions : (dict, optional)
+            a dictionary associating the region [chr, start, end] to a specific resolution 
+            used as key.
+        - list_resol : (list, optional)
+            the list of the resolutions used as keys for the MatrixView object creation.
+    
+    Returns:
+        The MatrixView object constructed with the data in the given NamedTuple obtained 
+        through using itertuples() on a DataFrame. 
+    """
+    if row.mtype == "RealMatrix":
+        l_resol = row.list_resol if (hasattr(row, "list_resol") and len(list(row.list_resol)) > 0) else list_resol
+        region = dict(row.region) if (hasattr(row, "list_resol") and len(list(row.list_resol)) > 0) else regions 
+
+        rebinned=row.rebinned
+        if isinstance(rebinned, str):
+            if rebinned.lower() == "true" :
+                rebinned = True
+        else :
+            rebinned  = False
+        
+        obj = build_MatrixView(mtype="RealMatrix",
+                               list_resolutions=l_resol,
+                               refgenome=row.refgenome,
+                               gtype=row.gtype,
+                               region = region,
+                               coolpath = row.coolpath,
+                               rebinned=row.rebinned,
+                               genome=row.genome)
+    
+    elif row.mtype == "OrcaMatrix":
+        l_resol = extract_resol_asc(row.path)
+
+        obj = build_MatrixView(mtype="OrcaMatrix",
+                               list_resolutions=l_resol,
+                               refgenome=row.refgenome,
+                               gtype=row.gtype,
+                               path=row.path)
+    
+    else :
+        raise TypeError(f"{row.mtype} is not a supported matrix type. Only 'RealMatrix' "
+                        f"and 'OrcaMatrix' are supported...Exiting.")
+
+    return obj
+
+
 
 def build_CompareMatrices(filepathref: str, filepathcomp: str) :
     """
@@ -1818,68 +1936,96 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
     df = pd.read_csv(filepathcomp, header=0, sep='\t')
     comp = {}
     for row in df.itertuples(index=False):
-        if row.mtype == "RealMatrix":
+        if row.obj_type == "RealMatrix":
             obj = RealMatrix(region=row.region, 
                              resolution=row.resol, 
                              gtype=row.gtype, 
-                             coolfilepath=row.coolpath,
+                             coolpath=row.coolpath,
                              genome=row.genome)
         
-        elif row.mtype == "OrcaMatrix":
+        elif row.obj_type == "OrcaMatrix":
             obj = OrcaMatrix(orcapredfile=row.orcapredpath, 
                              normmatfile=row.normmatpath, 
                              gtype=row.gtype)
         
-        elif row.mtype == "OrcaRun":
-            obj = build_OrcaRun(path=row.path,
-                                refgenome=row.refgenome,
-                                gtype=row.gtype)
+        elif row.obj_type == "MatrixView":
+            obj = _build_MatrixView_(row=row)
+        
+        else : 
+            raise TypeError(f"{row.obj_type} is not a supported object type. "
+                            "Only 'RealMatrix', 'OrcaMatrix' and 'MatrixView "
+                            "are supported...Exiting.")
     
         comp[row.name] = obj
 
+
     ref_df = pd.read_csv(filepathref, header=0, sep='\t')
 
-    if ref_df.iloc[0]["mtype"] == "RealMatrix":
-        
-        rebinned=ref_df.iloc[0]["rebinned"]
+    ref_row = next(ref_df.itertuples(index=False))
+
+    if ref_row.obj_type == "RealMatrix":
+        if any(isinstance(value, MatrixView) for value in comp.values()):
+            raise TypeError("MatrixView objects cannot be used with Matrix"
+                            "objects. This comparison is not supported.")
+
+        rebinned=ref_row.rebinned
         if isinstance(rebinned, str):
             if rebinned.lower() == "true" :
                 rebinned = True
-        else :
-            rebinned  = False
-
-        if all(isinstance(value, OrcaRun) for value in comp.values()):
-            first_orca_run = next(iter(comp.values()))
-            regions = first_orca_run.region
-            
-            ref = {key: RealMatrix(region = value,
-                                   resolution = key,
-                                   gtype = ref_df.iloc[0]["gtype"],
-                                   coolfilepath = ref_df.iloc[0]["coolpath"],
-                                   rebinned=ref_df.iloc[0]["rebinned"],
-                                   genome=ref_df.iloc[0]["genome"]) 
-                        for key, value in regions.items()}
         
-        elif any(isinstance(value, OrcaRun) for value in comp.values()):
-            raise TypeError("OrcaRun objects cannot be used with other types of"
+        refer = next(iter(comp.values())).references
+        if any(mat.references != refer for mat in comp.values()) :
+            logging.warning("There are at least two Matrix objects with different " \
+                            "references in the compared dictionary. Using the " \
+                            "references of the first Matrix object created in this " \
+                            "dictionary...Proceeding.")
+        resolution_1 = refer[3]
+        region_1 = refer[:2]
+                
+        ref = RealMatrix(region = region_1,
+                         resolution = resolution_1,
+                         gtype = ref_row.gtype,
+                         coolpath = ref_row.coolpath,
+                         rebinned=rebinned,
+                         genome=ref_row.genome,
+                         refgenome=ref_row.refgenome)
+    
+    elif ref_row.obj_type == "OrcaMatrix":
+        if any(isinstance(value, MatrixView) for value in comp.values()):
+            raise TypeError("MatrixView objects cannot be used with Matrix"
+                            "objects. This comparison is not supported.")
+
+        path = ref_row.path
+        resol = ref_row.resol
+
+        ref = OrcaMatrix(orcapredfile=f"{path}/pred_predictions_{resol}.txt", 
+                         normmatfile=f"{path}/pred_normmats_{resol}.txt", 
+                         gtype=ref_row.gtype,
+                         refgenome=ref_row.refgenome)
+    
+    elif ref_row.obj_type == "MatrixView":
+        if any(isinstance(value, Matrix) for value in comp.values()):
+            raise TypeError("MatrixView objects cannot be used with Matrix"
                             "objects. This comparison is not supported.")
         
-        else:
-            ref = next(iter(comp.values())).references
-            ref.pop()
-            resolution_1 = ref.pop()
-            region_1 = ref
-                    
-            ref = RealMatrix(region = region_1,
-                             resolution = resolution_1,
-                             gtype = ref_df.iloc[0]["gtype"],
-                             coolfilepath = ref_df.iloc[0]["coolpath"],
-                             rebinned=ref_df.iloc[0]["rebinned"])
-    elif ref_df.iloc[0]["mtype"] == "OrcaRun":
-        ref = build_OrcaRun(path=ref_df.iloc[0]["path"],
-                            refgenome=ref_df.iloc[0]["genome"],
-                            gtype=ref_df.iloc[0]["gtype"])
+        refer = next(iter(comp.values()))
+        if any(mat.references != refer.references for mat in comp.values()) :
+            logging.warning("There are at least two Matrix objects with different " \
+                            "references in the compared dictionary. Using the " \
+                            "references of the first Matrix object created in this " \
+                            "dictionary...Proceeding.")
+        list_resolutions_1 = refer.region.keys()
+        regions_1 = refer.region
 
+        ref = _build_MatrixView_(row=ref_row,
+                                 regions=regions_1,
+                                 list_resol=list_resolutions_1)
+
+    else : 
+        raise TypeError(f"{row.obj_type} is not a supported object type. "
+                        "Only 'RealMatrix', 'OrcaMatrix' and 'MatrixView "
+                        "are supported...Exiting.")
+    
     return CompareMatrices(ref, comp)
 
 

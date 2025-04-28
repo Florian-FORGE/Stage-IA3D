@@ -1,0 +1,3 @@
+chrom	name	start	end	strand	operation	ref_seq	variant_seq
+chr1	MA0139.1.CTCF	15770669	15770687	+	shuffle	GGTCAGCAGGGGGCGCTC	CAGGGAGCGGGTTCGCCG
+chr1	MA0139.1.CTCF_1	15877378	15877396	-	shuffle	cctgccccctgctggaaa	tccgtccccggaacgatc
