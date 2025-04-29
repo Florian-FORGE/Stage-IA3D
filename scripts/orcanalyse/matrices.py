@@ -12,7 +12,7 @@ import numpy as np
 
 import pandas as pd
 import os
-from typing import Dict, Union, Callable, NamedTuple
+from typing import Dict, Union, Callable, NamedTuple, List
 from collections import ChainMap, OrderedDict
 
 from matplotlib import figure, axes
@@ -1034,6 +1034,26 @@ class MatrixView():
                               j=j)
             j+=1
 
+    def _scores(self, l_resol: List[str], score_type: str = "insulation_count") :
+        """
+        Method to retrieve the scores of the score_type type for every 
+        resolution given in the l_resol list. If there is only one given 
+        resolution, then the list of score values is returned. Elif there 
+        are more than one given resolution, the corresponding scores are 
+        returned in a dictionary associated with the associated resolution 
+        as key.
+        """
+        if len(l_resol) == 1 :
+            resol = l_resol[0]
+            return get_property(self.di[resol], score_type)
+        
+        elif len(l_resol) > 1 :
+            scores = {}
+            for resol in l_resol :
+                score = get_property(self.di[resol], score_type)
+                scores[resol] = score
+            return scores
+
 
 
 
@@ -1194,6 +1214,37 @@ class CompareMatrices():
                                  {f"{name}" : matrix.references for name, matrix 
                                   in self.comp_dict.items()}))
     
+    def scores(self, 
+                      l_run: List[str], 
+                      l_resol: List[str] = "all", 
+                      score_type: str = "insulation_count"):
+        """
+        Method to get the scores of the specified runs (e.g. the reference one 
+        or ones in the compared dictionary) for one kind of score (e.g. PC1, or 
+        an insulation count) and for each given resolution in l_resol. By default, 
+        l_resol = "all" and every resolutions in the ref object will be used. 
+        """
+        if l_resol == "all":
+            l_resol = [resol for resol in self.resolution_ref]
+        
+        if len(l_run) == 1 :
+            run = l_run[0]
+            if run == "ref" :
+                return self.ref._scores(l_resol=l_resol, score_type=score_type)
+            
+            return self.comp_dict[run]._scores(l_resol=l_resol, score_type=score_type)
+        
+        else :
+            scores = {}
+            for run in l_run :
+                if run == "ref" :
+                    score = self.ref._scores(l_resol=l_resol, score_type=score_type)
+                
+                score = self.comp_dict[run]._scores(l_resol=l_resol, score_type=score_type)
+                scores[run] = score
+            
+            return scores
+
 
     def heatmaps(self, 
                  output_file: str = None, 
@@ -1554,7 +1605,7 @@ class CompareMatrices():
                     ax.plot(score, score_ref, "o", color = color, alpha=alpha)
 
                     slope, intercept, _, _, _ = linregress(score, score_ref)
-                    regression_line = slope * score + intercept
+                    regression_line = slope * score_ref + intercept
                 
                     corr_coeff = np.corrcoef(score, score_ref)[0, 1]
                 
@@ -1907,8 +1958,10 @@ class CompareMatrices():
     def superposed_scatter(self, ftype: Callable = correl_mat, **kwargs) :
         """
         Function that allows superposition of graphs in case there are several 
-        'Rdm_mut_{i}' (or even one) predictions with a 'Wtd_mut' prediction (one 
-        and only one).
+        'Rdm_mut_{i}' (at least one) predictions with a 'Wtd_mut' prediction (one 
+        and only one). It mainly ensures that certain conditions are met in order 
+        to process to the superposition, to check that the superposition will convey 
+        coherent information.
 
         Parameters
         ----------
