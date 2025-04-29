@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import os
 from typing import Dict, Union, Callable, NamedTuple
-from collections import ChainMap
+from collections import ChainMap, OrderedDict
 
 from matplotlib import figure, axes
 from matplotlib.gridspec import GridSpec
@@ -218,6 +218,24 @@ def replace_nan_with_neighbors_mean(arr):
                 
                 arr[i] = np.nanmean(neighbors) if neighbors is not None else 0
     return arr
+
+
+def normalize(values, sigma, smooth) :
+    values = gaussian_filter(values, sigma=sigma) if smooth else values
+    values = (values - np.min(values)) / (np.max(values) - np.min(values))
+    return values
+
+def ensure_numeric(input_data):
+    try:
+        array = np.asarray(input_data, dtype=np.float64)  # Convert to float64 for safety
+        return array
+    except ValueError:
+        raise TypeError("Input cannot be safely coerced to a numeric type.")
+
+def validate_safe_cast(input_data):
+    if not np.can_cast(input_data, np.float64, casting='safe'):
+        raise TypeError("Input cannot be safely cast to a numeric type.")
+
 
 
 
@@ -952,12 +970,13 @@ class MatrixView():
         a dictionary which keys are the resolution of the Matrix objects 
         associated to these keys.
     """    
-    def __init__(self, di: Dict[str, Matrix]):
+    def __init__(self, di: Dict[str, Matrix], mtype : str = None):
         self.di = di
         self.region = {key: value.region for key, value in di.items()}
         self.references = {key: value.references for key, value in di.items()}
         self.prefixes = [value.prefix for _, value in di.items()]
         self._refgenome = None
+        self.mtype = mtype
     
     @property
     def refgenome(self):
@@ -1067,9 +1086,9 @@ def build_MatrixView(mtype: str,
 
         for resol in list_resolutions :
             di[resol] = OrcaMatrix(orcapredfile=f"{path}/pred_predictions_{resol}.txt", 
-                                    normmatfile=f"{path}/pred_normmats_{resol}.txt", 
-                                    gtype=gtype,
-                                    refgenome=refgenome)
+                                   normmatfile=f"{path}/pred_normmats_{resol}.txt", 
+                                   gtype=gtype,
+                                   refgenome=refgenome)
     elif mtype == "RealMatrix" :
         for resol in list_resolutions :
             di[resol] = RealMatrix(region = kwargs["region"][resol],
@@ -1080,7 +1099,7 @@ def build_MatrixView(mtype: str,
                                    genome=kwargs["genome"],
                                    refgenome=refgenome) 
     
-    return MatrixView(di)
+    return MatrixView(di, mtype)
 
 
 
@@ -1493,6 +1512,8 @@ class CompareMatrices():
                 raise ValueError("The %s Matrix do not have the same references as "
                                  "the reference. Compatibility issues may occur." %key)
         
+        method_name = inspect.currentframe().f_code.co_name
+        
         with PdfPages(output_file, keep_empty=False) as pdf:
             if isinstance(self.ref, Matrix):
                 score_ref = np.array(get_property(self.ref, score_type))
@@ -1503,10 +1524,10 @@ class CompareMatrices():
                 f = plt.figure(clear=True, figsize=(10, 10*(len(score_comp))))
                 ax = f.add_subplot(gs[0, 0])
 
-                alpha, step = 1, 1
+                alpha, color = 1, COLOR_CHART[score_type]
                 if superposed :
-                    sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
-                    _alpha, step = sup_param["alpha"], sup_param["step"]
+                    sup_param = SUPERPOSED_PARAMETERS[method_name]
+                    _alpha, _color = sup_param["alpha"], sup_param["color"][score_type]
 
                 i=0
                 for key, score in score_comp.items() :
@@ -1516,10 +1537,21 @@ class CompareMatrices():
                     if superposed :
                         if "wtd" in [part.lower() for part in key.split("_")] :
                             alpha = _alpha["wtd"]
+                            color = _color["wtd"]
                         elif "rdm" in [part.lower() for part in key.split("_")] :
                              alpha = _alpha["rdm"]
+                             color = _color["rdm"]
 
-                    ax.scatter(score, score_ref, c=COLOR_CHART[score_type], alpha=alpha)
+                    max_x = max(score_ref)
+                    max_y = max(np.max(score_comp[key])
+                                            for key in score_comp[keys])
+                    
+                    max_y = max_y / max_x if max_x != 0 else max_y
+                    max_y *= 1.1
+                    
+                    ax.set_ylim(0, max_y)
+
+                    ax.plot(score, score_ref, "o", color = color, alpha=alpha)
 
                     slope, intercept, _, _, _ = linregress(score, score_ref)
                     regression_line = slope * score + intercept
@@ -1539,9 +1571,9 @@ class CompareMatrices():
                     ax.set_ylabel("Reference scores")
                     ax.set_title(f"Scatterplot_{key}_{score_type}")
                     
-                    i+=step
+                    i+=1
             
-            else :
+            elif isinstance(self.ref, MatrixView) :
                 score_ref = {key: get_property(mat, score_type) 
                                     for key, mat in self.ref.di.items()}
                 
@@ -1553,55 +1585,87 @@ class CompareMatrices():
                 f = plt.figure(clear=True, 
                                figsize=(10*len(score_ref), 20*(len(score_comp))))
                 
-                ax = f.add_subplot(gs[0, 0])
-
-                alpha, step = 1, 1
+                alpha, color = 1, COLOR_CHART[score_type]
                 if superposed :
-                    sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
-                    _alpha, step = sup_param["alpha"], sup_param["step"]
+                    sup_param = SUPERPOSED_PARAMETERS[method_name]
+                    _alpha, _color = sup_param["alpha"], sup_param["color"][score_type]
                 
+                legend_data = {}
                 i=0
-                for keys in score_comp :
+                for keys in reversed(score_comp.keys()) if superposed else score_comp.keys() :
                     j=0
                     for key in score_ref :
                         if i==0 :
                             ax = f.add_subplot(gs[i, j])
-                        if not superposed and i >= 1 :
+                        elif not superposed and i >= 1 :
                             ax = f.add_subplot(gs[i, j])
                         elif superposed and i>=1 :
-                            ax = f.axes[0, j]
+                            ax = f.axes[j]
                                                 
                         if superposed :
-                            if "wtd" in [part.lower() for part in key.split("_")] :
+                            if "wtd" in [part.lower() for part in keys.split("_")] :
                                 alpha = _alpha["wtd"]
-                            elif "rdm" in [part.lower() for part in key.split("_")] :
+                                color = _color["wtd"]
+                            elif "rdm" in [part.lower() for part in keys.split("_")] :
                                 alpha = _alpha["rdm"]
+                                color = _color["rdm"]
+                            else : 
+                                raise NameError("To use the superposed mode, the names of the " \
+                                                "runs should include either 'wtd' or 'rdm'... Exiting")
                         
                         score = np.array(score_comp[keys][key])
                         ref = np.array(score_ref[key])
 
-                        ax.scatter(score, ref, c=COLOR_CHART[score_type], alpha=alpha)
+                        ax.plot(score, ref, "o", color=color, alpha=alpha)
                         
-                        slope, intercept, _, _, _ = linregress(score, ref)
-                        regression_line = slope * score + intercept
+                        if (superposed and "wtd" in [part.lower() for part in keys.split("_")]) or not superposed :
+                            legend_data[key] = {}
+                            legend_data[key]["index"] = j
 
-                        corr_coeff = np.corrcoef(score, ref)[0, 1]
-                        
-                        SSD = np.sum((score - regression_line) ** 2)
+                            slope, intercept, _, _, _ = linregress(score, ref)
+                            regression_line = slope * ref + intercept
+                            legend_data[key]["reg_line"] = regression_line
+                            legend_data[key]["ref_values"] = ref
 
-                        if i >= 1 or not superposed :
-                            ax.plot(score, regression_line, 
-                                    color="black", label="Regression Line")
-
-                            ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
-                                    transform=ax.transAxes, fontsize=12, verticalalignment='top',
-                                    bbox=dict(boxstyle="round", facecolor="white"))
-                        
-                        ax.set_xlabel(f"{keys}'s scores")
-                        ax.set_ylabel("Reference scores")
-                        ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
+                            corr_coeff = np.corrcoef(score, ref)[0, 1]
+                            legend_data[key]["corr_coeff"] = corr_coeff
+                            
+                            SSD = np.sum((score - regression_line) ** 2)
+                            legend_data[key]["SSD"] = SSD
+                            
+                            if not superposed :
+                                ax.plot(ref, regression_line, color="black", label="Regression Line")
+                            
+                                ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                        transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                        bbox=dict(boxstyle="round", facecolor="white"))
+                            
+                                ax.set_xlabel(f"{keys}'s values")
+                                ax.set_ylabel("Reference values")
+                                ax.set_title(f"Scatterplot_{keys}_{key}_{score_type}")
+                                ax.legend()
                         j+=1
-                    i+=step
+                    i+=1
+                
+                if superposed :
+                    for key, data in legend_data.items():
+                        k = data["index"]
+                        ax = f.axes[k]
+                                        
+                        regression_line = data["reg_line"]
+                        ref_values = data["ref_values"]
+                        ax.plot(ref_values, regression_line, color="black", label="Regression Line")
+                        
+                        corr_coeff = data["corr_coeff"]
+                        SSD = data["SSD"]
+                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                bbox=dict(boxstyle="round", facecolor="white"))
+                    
+                        ax.set_xlabel("Compared values")
+                        ax.set_ylabel("Reference values")
+                        ax.set_title(f"Scatterplot_superposed_{key}_{score_type}")
+                        ax.legend()
                 
             if output_file: 
                 plt.savefig(output_file, transparent=True)
@@ -1652,13 +1716,13 @@ class CompareMatrices():
 
             ax = f.add_subplot(gs[0, 0])
 
-            alpha, step = 1, 1
+            alpha, color = 1, "black"
             if superposed :
-                sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
-                _alpha, step = sup_param["alpha"], sup_param["step"]
+                sup_param = SUPERPOSED_PARAMETERS[method_name]
+                _alpha, _color = sup_param["alpha"], sup_param["color"]
 
             i=0
-            for key, values in comp.items() :
+            for key, values in reversed(comp.items()) if superposed else comp.items() :
                 array_comp = np.array([values, ref])
                 array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
 
@@ -1668,39 +1732,59 @@ class CompareMatrices():
                 if superposed :
                     if "wtd" in [part.lower() for part in key.split("_")] :
                         alpha = _alpha["wtd"]
+                        color = _color["wtd"]
                     elif "rdm" in [part.lower() for part in key.split("_")] :
-                            alpha = _alpha["rdm"]
+                        alpha = _alpha["rdm"]
+                        color = _color["rdm"]
 
-                ax.scatter(array_comp[0], array_comp[1], c="black", alpha=alpha)
                 
-                slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
-                regression_line = slope * array_comp[0] + intercept
-
-                corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
+                max_x = max(ref[key])
+                max_y = max(np.max(comp[keys][key])
+                                        for keys in comp
+                                            for key in comp[keys])
                 
-                SSD = np.sum((array_comp[0] - regression_line) ** 2)
+                max_y = max_y / max_x if max_x != 0 else max_y
+                max_y *= 1.1
+                
+                ax.set_ylim(0, max_y)
 
-                if i >= 1 or not superposed :
+                ax.plot(array_comp[0], array_comp[1], "+", color = color, alpha=alpha)
+                
+                if (superposed and "wtd" in [part.lower() for part in keys.split("_")]) or not superposed:
+                    slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
+                    regression_line = slope * array_comp[0] + intercept
+
+                    corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
+                    
+                    SSD = np.sum((array_comp[0] - regression_line) ** 2)
+                    
                     ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
                 
                     ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
                             transform=ax.transAxes, fontsize=12, verticalalignment='top',
                             bbox=dict(boxstyle="round", facecolor="white"))
                 
-                ax.set_xlabel(f"{key}'s values")
-                ax.set_ylabel("Reference values")
-                ax.set_title(f"Scatterplot_{key}_correlation")
-                ax.legend()
-                i+=step
+                i+=1
             
-        else :
-            if isinstance(self.ref, MatrixView) :
-                ref = {key: mat.obs_o_exp.flatten()
-                             for key, mat in self.ref.di.items()}
-                ref_sigma = indic["val"]["OrcaMatrix"]
             
-            comp = {keys: {key: {"values" :mat.obs_o_exp.flatten(), 
-                                 "sigma" : indic["val"][mat.__class__.__name__]}
+            ax.set_xlabel(f"{key}'s values")
+            ax.set_ylabel("Reference values")
+            ax.set_title(f"Scatterplot_{key}_correlation")
+            ax.legend()
+            
+        elif isinstance(self.ref, MatrixView) :
+            ref = {key: normalize(get_property(mat, 
+                                               mat.which_matrix("count")
+                                  ).flatten(), 
+                                  indic["val"][self.ref.mtype],
+                                  indic["bool"])
+                            for key, mat in self.ref.di.items()}
+            
+            comp = {keys: {key: normalize(get_property(mat, 
+                                                       mat.which_matrix("count")
+                                          ).flatten(), 
+                                          indic["val"][run.mtype],
+                                          indic["bool"])
                                 for key, mat in run.di.items()} 
                             for keys, run in self.comp_dict.items()}
             
@@ -1708,70 +1792,117 @@ class CompareMatrices():
             f = plt.figure(clear=True, 
                            figsize=(10*len(ref), 20*(len(comp))))
             
-            alpha, step = 1, 1
+            alpha, color = 1, "k"
             if superposed :
-                sup_param = SUPERPOSED_PARAMETERS["scores_regression"]
-                _alpha, step = sup_param["alpha"], sup_param["step"]
+                sup_param = SUPERPOSED_PARAMETERS[method_name]
+                _alpha, _color = sup_param["alpha"], sup_param["color"]
             
+            legend_data = {}
             i=0
-            for keys in comp :
+            for keys in reversed(comp.keys()) if superposed else comp.keys() :
                 j=0
                 for key in ref :
-                    values = comp[keys][key]["values"]
-                    values = gaussian_filter(values, sigma=comp[keys][key]["sigma"]
-                                             ) if indic["bool"] else values
-                    values = (values - np.min(values)) / (np.max(values) - np.min(values))
-
+                    values = comp[keys][key]
+                    values = ensure_numeric(values)
+                    validate_safe_cast(values)
+                    
                     ref_val = ref[key]
-                    ref_val = gaussian_filter(ref_val, sigma=ref_sigma) if SMOOTH_MATRIX[method_name] else ref_val
-                    ref_val = (ref_val - np.min(ref_val)) / (np.max(ref_val) - np.min(ref_val))
-
+                    ref_val = ensure_numeric(ref_val)
+                    validate_safe_cast(ref_val)
+                    
                     array_comp = np.array([values, ref_val])
                     array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
                     
                     if i==0 :
                         ax = f.add_subplot(gs[i, j])
-                    if not superposed and i >= 1 :
+                    elif not superposed and i >= 1 :
                         ax = f.add_subplot(gs[i, j])
                     elif superposed and i>=1 :
-                        ax = f.axes[0, j]
+                        ax = f.axes[j]
                                                                 
                     if superposed :
-                        if "wtd" in [part.lower() for part in key.split("_")] :
+                        if "wtd" in [part.lower() for part in keys.split("_")] :
                             alpha = _alpha["wtd"]
-                        elif "rdm" in [part.lower() for part in key.split("_")] :
+                            color = _color["wtd"]
+                        elif "rdm" in [part.lower() for part in keys.split("_")] :
                             alpha = _alpha["rdm"]
+                            color = _color["rdm"]
+                        else : 
+                            raise NameError("To use the superposed mode, the names of the " \
+                                            "runs should include either 'wtd' or 'rdm'... Exiting")
+
+                        max_x = max(ref[key])
+                        max_y = max(np.max(comp[keys][key])
+                                                for keys in comp
+                                                    for key in comp[keys])
+                        
+                        max_y = max_y / max_x if max_x != 0 else max_y
+                        max_y *= 1.1
+                        
+                        ax.set_ylim(0, max_y)
+
                                        
-                    ax.scatter(array_comp[0], 
-                               array_comp[1], 
-                               c="black",
-                               alpha=alpha)
+                    ax.plot(array_comp[0], 
+                            array_comp[1], 
+                            "+",
+                            color = color,
+                            alpha=alpha)
                     
-                    slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
-                    regression_line = slope * array_comp[0] + intercept
+                    
+                    if (superposed and "wtd" in [part.lower() for part in keys.split("_")]) or not superposed :
+                        legend_data[key] = {}
+                        legend_data[key]["index"] = j
 
-                    corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
-                    
-                    SSD = np.sum((array_comp[0] - regression_line) ** 2)
+                        slope, intercept, _, _, _ = linregress(array_comp[0], array_comp[1])
+                        regression_line = slope * array_comp[1] + intercept
+                        legend_data[key]["reg_line"] = regression_line
+                        legend_data[key]["ref_values"] = array_comp[1]
 
-                    if i >= 1 or not superposed :
-                        ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
-                    
-                        ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
-                                transform=ax.transAxes, fontsize=12, verticalalignment='top',
-                                bbox=dict(boxstyle="round", facecolor="white"))
-                    
-                    ax.set_xlabel(f"{keys}'s values")
-                    ax.set_ylabel("Reference values")
-                    ax.set_title(f"Scatterplot_{keys}_{key}_correlation")
-                    ax.legend()
+                        corr_coeff = np.corrcoef(array_comp[0], array_comp[1])[0, 1]
+                        legend_data[key]["corr_coeff"] = corr_coeff
+                        
+                        SSD = np.sum((array_comp[0] - regression_line) ** 2)
+                        legend_data[key]["SSD"] = SSD
+                        
+                        if not superposed :
+                            ax.plot(array_comp[1], regression_line, color="red", label="Regression Line")
+                        
+                            ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                                    transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                                    bbox=dict(boxstyle="round", facecolor="white"))
+                        
+                            ax.set_xlabel(f"{keys}'s values")
+                            ax.set_ylabel("Reference values")
+                            ax.set_title(f"Scatterplot_{keys}_{key}_correlation")
+                            ax.legend()
                     j+=1
-                i+=step
+                i+=1
 
+            if superposed :
+                for key, data in legend_data.items():
+                    k = data["index"]
+                    ax = f.axes[k]
+                                       
+                    regression_line = data["reg_line"]
+                    ref_values = data["ref_values"]
+                    ax.plot(ref_values, regression_line, color="red", label="Regression Line")
+                    
+                    corr_coeff = data["corr_coeff"]
+                    SSD = data["SSD"]
+                    ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
+                            transform=ax.transAxes, fontsize=12, verticalalignment='top',
+                            bbox=dict(boxstyle="round", facecolor="white"))
+                
+                    ax.set_xlabel(f"Compared values")
+                    ax.set_ylabel("Reference values")
+                    ax.set_title(f"Scatterplot_superposed_{key}_correlation")
+                    ax.legend()
+                    
         if outputfile: 
             plt.savefig(outputfile)
         else:
             plt.show()
+
 
     def superposed_scatter(self, ftype: Callable = correl_mat, **kwargs) :
         """
@@ -1822,24 +1953,24 @@ class CompareMatrices():
                             "'wtd' indicator in its name...Exiting")
         
         if ftype.__name__ == "correl_mat" :
-            if kwargs["outputfile"] :
+            if "outputfile" in kwargs.keys():
                 outputfile = kwargs["outputfile"]
             else :
                 outputfile = None
             superposed = True
-            ftype(self, outputfile, superposed)
+            ftype(outputfile, superposed)
         
         elif ftype.__name__ == "scores_regression" :
-            if kwargs["outputfile"] :
+            if "outputfile" in kwargs.keys() :
                 outputfile = kwargs["outputfile"]
             else :
                 outputfile = None
-            if kwargs["score_type"] :
+            if "score_type" in kwargs.keys() :
                 score_type = kwargs["score_type"]
             else :
                 score_type = "insulation_count"
             superposed = True
-            ftype(self, outputfile, score_type, superposed)
+            ftype(outputfile, score_type, superposed)
         
 
 

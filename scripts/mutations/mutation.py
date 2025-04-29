@@ -308,10 +308,11 @@ class Mutator():
         """
         Construct the concatenated sequence of the intervals specified by intervals
         For debugging purpose
+
         Parameters
         ----------
         intervals: list
-            a list of 2-dimetional array [start, end]
+            a list of 2-dimensional array [start, end]
         seq: str
             the complete sequence of the chromosome
         Returns
