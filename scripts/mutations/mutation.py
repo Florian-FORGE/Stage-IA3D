@@ -11,6 +11,8 @@ logging.basicConfig(
 from collections import defaultdict, OrderedDict
 from typing import List
 
+import pandas as pd
+
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
@@ -37,6 +39,7 @@ def eprint(*args, **kwargs):
     print(*args,  file=sys.stderr, **kwargs)
 
 
+
 class Mutation():
     """
     Tiny class for storing a bed interval with an associated mutation
@@ -48,6 +51,8 @@ class Mutation():
         self.sequence = sequence
         self.name = name
         self.strand = strand
+        self.ref = None
+        self.alt = None
         self.op = operation
         if operation == "insertion":
             if not self._validinsertion(sequence):
@@ -65,6 +70,10 @@ class Mutation():
         else:
             return False
 
+    def trace(self):
+        return {'chrom': self.chrom, 'name': self.name, 'start': self.start, 'end': self.end, 'strand': self.strand,
+                'operation': self.op, 'ref_seq': self.ref, 'variant_seq': self.alt}
+
     def __str__(self):
         return "%s\t%d\t%d\t%s\t%s" % (self.chrom, self.start, self.end, self.sequence,
                                        self.op)
@@ -74,7 +83,7 @@ class Mutation():
 
 class Mutator():
     """
-    Class associated to a particular mutation experimen
+    Class associated to a particular mutation experimenT
 
     For a given genome and a list of annotated intervals, constructs a mutated
     genome sequence.
@@ -93,7 +102,7 @@ class Mutator():
     fasta_handle: pysam FastaFile handle
         provide functionnality to fetch sequences (A cache mechanism is
         implemented in order to prevent multiple pysam FastaFile fetch invocation)
-    intervals: list of :obj:`BedInterval`
+     mutations: list of :obj:`Mutation`
         the specified mutations (interval + mutation type), see BedInterval class
     maximumCached: in optional
         the maximum number of cached sequences
@@ -101,16 +110,8 @@ class Mutator():
     Attributes
     ----------
     handle: the pysam handle
-    references: list
-        the list of chromosome names (unused)
-    intervals: list
-        the list of BedIntervals
-    cachedSequences: dict
-        the chromosomes sequences stored in a dictionnary
-    chromosome_mutations: dict
-        a dictionnary storing the number of mutations for each chromosome
-        trace: dict
-        a dictionnary storing the data in a VCF-like format for each mutations
+    mutations: list
+        the list of Mutation objects
 
     Configuration
     ----------
@@ -121,173 +122,128 @@ class Mutator():
     # Class-level constant
     silenced = True
     
-    def __init__(self, fasta_handle, intervals: List[Mutation], maximumCached : int = 4):
+    def __init__(self, fasta_handle, mutations: List[Mutation], maximumCached : int = 4):
         self.handle = fasta_handle
+        self.mutations = mutations
         self.maximumCached = maximumCached
-        self.references = fasta_handle.references
-        self.intervals = intervals
         self.cachedSequences = OrderedDict()
         self.chromosome_mutations = defaultdict(int)
         self.trace = defaultdict(list) 
-
-    def flush(self):
-        self.cachedSequences = {}
+        self.references = self.get_chromosomes()
+  
 
     @property
     def chromosomes(self):
         return self.references
 
-    def fetch(self, chromosome):
-        if chromosome not in self.cachedSequences:
-            if len(self.cachedSequences) >= (self.maximumCached-1):
+    def fetch(self, reference=None, start=None, end=None):
+        return  self.handle.fetch(reference=reference, start=start, end=end)
+
+    def fetch_old(self, reference=None, start=None, end=None):
+        if reference not in self.cachedSequences:
+            if len(self.cachedSequences) == self.maximumCached:
                 self.cachedSequences.popitem(last=False)
-            self.cachedSequences[chromosome] = self.handle.fetch(chromosome)
-        return self.cachedSequences[chromosome]
+            self.cachedSequences[reference] = self.handle.fetch(reference)
+        if start and end:
+            return self.cachedSequences[reference][start:end]
+        return self.cachedSequences[reference]
 
-    def modify(self, chrom, sequence):
-        self.cachedSequences[chrom] = sequence
-    
-    def record_trace(self,interval, silenced: bool = None):
-        if interval.name in self.trace[interval.chrom].keys():
-            name = interval.name
-            i=1
-            while name in self.trace[interval.chrom].keys():
-                name = f"{interval.name}_{i}"
-                i+=1
-            if (silenced is None and not self.silenced) or silenced == False :
-                logging.info(f"Mutation {interval.name} already exists, renaming to {name} ...")
-            interval.name = name
-            
-        self.trace[interval.chrom][interval.name]={}
-        self.trace[interval.chrom][interval.name]["start"]=interval.start
-        self.trace[interval.chrom][interval.name]["end"]=interval.end
-        self.trace[interval.chrom][interval.name]["strand"]=interval.strand
-        self.trace[interval.chrom][interval.name]["operation"]=interval.op
+    def get_chromosomes(self):
+        return set([mutation.chrom for mutation in self.mutations])
 
-    def shuffle(self, inter):
+    def get_ref(self, mutation: Mutation):
+        subseq = self.fetch(reference=mutation.chrom, start=mutation.start, end=mutation.end)
+        return subseq
+
+
+    def shuffle(self, mutation: Mutation):
         """"
         Interval will be shuffled and shuffled sequence will be put in a file
         """
-        seq = self.fetch(inter.chrom)
-        subseq = seq[inter.start:inter.end]
-        self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
-        shuffled = ''.join(random.sample(subseq, len(subseq)))
-        seq = replace_substring(seq, shuffled, inter.start, inter.end)
-        self.cachedSequences[inter.chrom] = seq
-        self.trace[inter.chrom][inter.name]["variant_seq"]=shuffled
+        subseq = self.get_ref(mutation)
+        mutation.ref = subseq
+        mutation.alt = ''.join(random.sample(subseq, len(subseq)))
 
-    def mask(self, inter):
+    def mask(self, mutation: Mutation):
         """"
         Interval will be masked
         """
-        seq = self.fetch(inter.chrom)
-        self.trace[inter.chrom][inter.name]["ref_seq"]=seq[inter.start:inter.end]
-        masked = 'N' * inter.len
-        seq = replace_substring(seq, masked, inter.start, inter.end)
-        self.cachedSequences[inter.chrom] = seq
-        self.trace[inter.chrom][inter.name]["variant_seq"]=masked
-
-    def invert(self, inter):
+        subseq = self.get_ref(mutation)
+        mutation.ref = subseq
+        mutation.alt = 'N' * len(subseq)
+        
+    def invert(self, mutation: Mutation):
         """"
         Interval will be rerverse complemented
         """
-        seq = self.fetch(inter.chrom)
-        subseq = seq[inter.start:inter.end]
-        self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
-        inverted = str(Seq(subseq).reverse_complement())
-        seq = replace_substring(seq, inverted, inter.start, inter.end)
-        self.cachedSequences[inter.chrom] = seq
-        self.trace[inter.chrom][inter.name]["variant_seq"]=inverted
+        subseq = self.get_ref(mutation)
+        mutation.ref = subseq
+        mutation.alt = str(Seq(subseq).reverse_complement())
 
 
-    def insert(self, inter, silenced: bool = None):
-        seq = self.fetch(inter.chrom)
-        subseq = seq[inter.start:inter.end]
-        self.trace[inter.chrom][inter.name]["ref_seq"]=subseq
-        if inter.strand == "+":
-            sequence = inter.sequence
+    def insert(self, mutation, silenced: bool = None):
+        subseq = self.get_ref(mutation)
+        mutation.ref = subseq
+        if mutation.strand == "+":
+            sequence = mutation.sequence
         else:
-            sequence = str(Seq(inter.sequence).reverse_complement())
+            sequence = str(Seq(mutation.sequence).reverse_complement())
 
         if len(subseq) < len(sequence):
             raise ValueError("%s %d %d  %s is not a valid insertion sequence" %
-                             (inter.chrom, inter.start, inter.end, self.sequence))
+                             (mutation.chrom, mutation.start, mutation.end, mutation.sequence))
         elif len(subseq) > len(sequence):
             if (silenced is None and not self.silenced) or silenced == False :
                 logging.info("The input sequence being shorter than the original " \
                              "sequence, the input sequence will be repeated to fill " \
                              "the original sequence...Proceeding")
             sequence = seq_rep_fill(sequence, len(subseq))
-        seq = replace_substring(seq, sequence, inter.start, inter.end)
-        self.cachedSequences[inter.chrom] = seq
-        self.trace[inter.chrom][inter.name]["variant_seq"]=sequence
+        mutation.alt = sequence
 
-
-    def record_SeqRecords(self, chrom):
-        """Returns the mutated chromosome as biopython SeqRecords"""
-        self.check(chrom)
-        seq = self.fetch(chrom)
-        num = self.chromosome_mutations[chrom]
-        seq_record = SeqRecord(Seq(seq).upper(), id=chrom,
-                               description=f"mutated chromosome {num} mutations")
-        return seq_record
-
-    def mutate_per_chrom(self, chrom):
-        """
-        Mutate the sequence for each interval in the chromosome according to the mutation type
-        """ 
-        interval_in_chrom = [interval for interval in self.intervals if interval.chrom == chrom]
-        
-        for interval in interval_in_chrom:
-            self.chromosome_mutations[interval.chrom] += 1
-            self.record_trace(interval)
-            if interval.op == "shuffle":
-                self.shuffle(interval)
-            elif interval.op == "mask":
-                self.mask(interval)
-            elif interval.op == "inversion":
-                self.invert(interval)
-            elif interval.op == "insertion":
-                self.insert(interval)
-
-            else:
-                self.chromosome_mutations[interval.chrom] -= 1
-                raise ValueError("%s is not a valid operation" % interval.op)
-        
 
     def mutate(self):
         """
-        Mutate the sequence for each interval according to the mutation type 
+        Mutate the sequence for each interval according to the mutation type
         and returns the set of mutated chromosomes as biopython SeqRecords.
         """
-        for interval in self.intervals:
-            self.trace[interval.chrom]={}
-        
-        # New way of doing this
-        seq_records = []
-        for chrom in self.trace.keys():
-            self.mutate_per_chrom(chrom=chrom)
-            seq_record = self.record_SeqRecords(chrom=chrom)
-            seq_records.append(seq_record)
-        
-        return seq_records
+        for mutation in self.mutations:
+            self.chromosome_mutations[mutation.chrom] += 1
+            if mutation.op == "shuffle":
+                self.shuffle(mutation)
+            elif mutation.op == "mask":
+                self.mask(mutation)
+            elif mutation.op == "inversion":
+                self.invert(mutation)
+            elif mutation.op == "insertion":
+                self.insert(mutation)
+            else:
+                self.chromosome_mutations[mutation.chrom] -= 1
+                raise ValueError("%s is not a valid operation" % mutation.op)
 
+    def get_mutated_chromosome_sequence(self, chrom):
+        chrom_intervals = [interval for interval in self.mutations if interval.chrom == chrom]
+        chrom_len = len(self.fetch(reference=chrom))
+        offset = 0
+        mutated_chromosome = ""
+        for inter in sorted(chrom_intervals, key=lambda x: x.start):
+            previous_seq = self.fetch(reference=chrom, start=offset, end=inter.start)
+            mutated_seq = inter.alt
+            mutated_chromosome += previous_seq + mutated_seq
+            offset = inter.end
+        mutated_chromosome += self.fetch(reference=chrom, start=offset, end=chrom_len)
+        return mutated_chromosome
 
-        # for interval in self.intervals:
-        #     self.chromosome_mutations[interval.chrom] += 1
-        #     self.record_trace(interval)
-        #     if interval.op == "shuffle":
-        #         self.shuffle(interval)
-        #     elif interval.op == "mask":
-        #         self.mask(interval)
-        #     elif interval.op == "inversion":
-        #         self.invert(interval)
-        #     elif interval.op == "insertion":
-        #         self.insert(interval)
-
-        #     else:
-        #         self.chromosome_mutations[interval.chrom] -= 1
-        #         raise ValueError("%s is not a valid operation" % interval.op)
+    def get_mutated_chromosome_records(self, chromosomes: list = None):
+        sequence_records = []
+        l_chrom = chromosomes if chromosomes is not None else self.chromosomes
+        for chrom in l_chrom:
+            chrom_seq = self.get_mutated_chromosome_sequence(chrom)
+            num = self.chromosome_mutations[chrom]
+            seq_record = SeqRecord(Seq(chrom_seq).upper(), id=chrom,
+                                   description=f"mutated chromosome {num} mutations")
+            sequence_records.append(seq_record)
+        return sequence_records
+    
 
     def intervals_complement(self, chrom):
         """
@@ -295,7 +251,7 @@ class Mutator():
         Equivalent to bedtools complement
         """
         chrom_intervals = [inter for inter in self.intervals if inter.chrom == chrom]
-        chrom_len = len(self.fetch(chrom))
+        chrom_len = len(self.fetch(reference=chrom))
         intervals = []
         previous = 0
         for inter in sorted(chrom_intervals, key=lambda x: x.start):
@@ -340,26 +296,12 @@ class Mutator():
         else:
             eprint("Valid mutated chrom %s" % chrom)
 
-    def get_SeqRecords(self, chromosomes: list = None):
-        """Returns the set of mutated chromosomes as biopython SeqRecords"""
-        seq_records = []
-        l_chrom = chromosomes if chromosomes is not None else self.chromosomes
-        for chrom in l_chrom:
-            self.check(chrom)
-            seq = self.fetch(chrom)
-            num = self.chromosome_mutations[chrom]
-            seq_record = SeqRecord(Seq(seq).upper(), id=chrom,
-                                   description=f"mutated chromosome {num} mutations")
-            seq_records.append(seq_record)
-        return seq_records
-    
     def get_trace(self):
-        keys = ["chrom", "name", "start", "end", "strand", "operation", "ref_seq", "variant_seq"]
-        data=[]
-        for key in self.trace:
-            for k in self.trace[key]:
-                data.append([key, k, self.trace[key][k]["start"], self.trace[key][k]["end"], self.trace[key][k]["strand"], self.trace[key][k]["operation"], self.trace[key][k]["ref_seq"], self.trace[key][k]["variant_seq"]])
-        return data, keys
+        data = []
+        for mutation in self.mutations:
+            data.append(mutation.trace())
+        return pd.DataFrame(data)
+
 
 
 def replace_substring(seq, newstring: str, start: int, end: int):
@@ -376,7 +318,7 @@ def replace_substring(seq, newstring: str, start: int, end: int):
 def seq_rep_fill(seq: str = "A", length: int = None):
     """
     Function that provides a proper filling sequence for a given length, 
-    by creating a repeatition of the input sequence (e.g. seq="ATCG" and 
+    by creating a repetition of the input sequence (e.g. seq="ATCG" and 
     length=10 will return "ATCGATCGAT")
     """
     if length is None:
@@ -388,5 +330,4 @@ def seq_rep_fill(seq: str = "A", length: int = None):
     else:
         filling = ""
     return seq * (length // len(seq)) + filling
-
 

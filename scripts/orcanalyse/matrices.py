@@ -5,7 +5,7 @@ import bioframe
 from pysam import FastaFile
 
 from sklearn.decomposition import PCA
-from scipy.stats import linregress
+from scipy.stats import linregress, spearmanr
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,6 +18,7 @@ from collections import ChainMap, OrderedDict
 from matplotlib import figure, axes
 from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_pdf import PdfPages
+from seaborn import violinplot, swarmplot, color_palette
 
 from matplotlib.ticker import EngFormatter
 bp_formatter = EngFormatter(unit = "b", places = 1, sep = " ")
@@ -31,7 +32,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX, TLVs_HEATMAP, SUPERPOSED_PARAMETERS
+from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX, TLVs_HEATMAP, SCATTER_PARAMETERS, DISPERSION_COLOR
 
 
 """
@@ -236,6 +237,29 @@ def validate_safe_cast(input_data):
     if not np.can_cast(input_data, np.float64, casting='safe'):
         raise TypeError("Input cannot be safely cast to a numeric type.")
 
+def phase_vectors(vect, phasing_track):
+    """
+    """
+    mask = np.isfinite(vect)
+    
+    corr = spearmanr(phasing_track[mask], vect[mask])[0]
+
+    vect = np.sign(corr) * vect
+
+    return vect
+
+def associate_score_to_standard_dev(score_type: str) : 
+    if score_type == "insulation_count" :
+        return "standard_dev_insul_count"
+    
+    elif score_type == "insulation_correl" :
+        return "standard_dev_insul_correl"
+    
+    elif score_type == "PC1" :
+        return "strandard_dev_PC1"
+    
+    else :
+        raise ValueError(f"This score_type : {score_type} is not supported...Exiting")
 
 
 
@@ -405,7 +429,7 @@ class Matrix():
     
     @property
     def insulation_count(self):
-        if  not self._insulation_count:
+        if not self._insulation_count:
             self._insulation_count = self._get_insulation_score()
         return self._insulation_count
     
@@ -988,6 +1012,7 @@ class MatrixView():
             self._refgenome = getattr(first_mat, "refgenome")
         return self._refgenome
 
+
     def _save_scores_(self, 
                       output_scores: str, 
                       list_scores_types: list = ["insulation_count", 
@@ -1034,7 +1059,7 @@ class MatrixView():
                               j=j)
             j+=1
 
-    def _scores(self, l_resol: List[str], score_type: str = "insulation_count") :
+    def _scores(self, l_resol: List[str], score_type: str = "insulation_count") -> Union[list, Dict[str, list]]:
         """
         Method to retrieve the scores of the score_type type for every 
         resolution given in the l_resol list. If there is only one given 
@@ -1045,15 +1070,36 @@ class MatrixView():
         """
         if len(l_resol) == 1 :
             resol = l_resol[0]
-            return get_property(self.di[resol], score_type)
+            scores = get_property(self.di[resol], score_type)
+            return scores
         
         elif len(l_resol) > 1 :
             scores = {}
             for resol in l_resol :
                 score = get_property(self.di[resol], score_type)
                 scores[resol] = score
-            return scores
+        
+        else :
+            raise ValueError("The list of resolutions should not be empty... Exiting.")
+        
+        return scores
 
+    def _matrices(self, l_resol: List[str]) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+        """
+        """
+        if len(l_resol) == 1 :
+            resol = l_resol[0]
+            mat = self.di[resol]
+            mat = get_property(mat, mat.which_matrix("count"))
+            return mat
+        
+        elif len(l_resol) > 1 :
+            matrices = {}
+            for resol in l_resol :
+                mat = self.di[resol]
+                mat = get_property(mat, mat.which_matrix("count"))
+                matrices[resol] = mat
+            return matrices
 
 
 
@@ -1121,6 +1167,20 @@ def build_MatrixView(mtype: str,
     
     return MatrixView(di, mtype)
 
+
+def get_matrix(obj: Union[Matrix, MatrixView], 
+               mtype: str = "count",
+               **kwargs
+               ) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+    """
+    """
+    if isinstance(obj, Matrix) :
+        return get_property(obj, obj.which_matrix(mtype=mtype))
+    
+    elif isinstance(obj, MatrixView) :
+        l_resol = kwargs["l_resol"]
+        matrices = obj._matrices(l_resol=l_resol)
+        return matrices
 
 
 
@@ -1205,6 +1265,12 @@ class CompareMatrices():
                                 f"attribute, or do not have compatible types for supported "
                                 f"comparison. Skipping compatibility check.")
         
+        self._standard_dev_mat = None
+        self._standard_dev_insul_count = None
+        self._standard_dev_insul_correl = None
+        self._standard_dev_PC1 = None
+
+
     @property
     def references(self):
         if self.same_ref :
@@ -1215,9 +1281,12 @@ class CompareMatrices():
                                   in self.comp_dict.items()}))
     
     def scores(self, 
-                      l_run: List[str], 
-                      l_resol: List[str] = "all", 
-                      score_type: str = "insulation_count"):
+               l_run: List[str] = None, 
+               l_resol: List[str] = "all", 
+               score_type: str = "insulation_count"
+               ) -> Union[list, 
+                          Dict[str, list], 
+                          Dict[str, Dict[str, list]]]:
         """
         Method to get the scores of the specified runs (e.g. the reference one 
         or ones in the compared dictionary) for one kind of score (e.g. PC1, or 
@@ -1227,23 +1296,155 @@ class CompareMatrices():
         if l_resol == "all":
             l_resol = [resol for resol in self.resolution_ref]
         
+        if l_run == None :
+            l_run = ["ref"] + [name for name in self.comp_dict.keys()]
+
+        scores = {}
+        for run in l_run :
+            if run == "ref" :
+                score = self.ref._scores(l_resol=l_resol, score_type=score_type)
+            
+            else:
+                score = self.comp_dict[run]._scores(l_resol=l_resol, 
+                                                    score_type=score_type)
+            
+            scores[run] = score
+                    
+        return scores
+
+    def matrices(self,
+                 l_run: List[str] = None, 
+                 l_resol: List[str] = "all"
+                 ) -> Union[np.ndarray, 
+                            Dict[str, np.ndarray], 
+                            Dict[str, Dict[str, np.ndarray]]] :
+        """
+        """
+        if l_resol == "all":
+            l_resol = [resol for resol in self.resolution_ref]
+        
+        if l_run == None :
+            l_run = ["ref"] + [name for name in self.comp_dict.keys()]
+        
         if len(l_run) == 1 :
             run = l_run[0]
             if run == "ref" :
-                return self.ref._scores(l_resol=l_resol, score_type=score_type)
+                matrices = get_matrix(self.ref, mtype="count", l_resol=l_resol)
+                return matrices
             
-            return self.comp_dict[run]._scores(l_resol=l_resol, score_type=score_type)
+            matrices = get_matrix(self.comp_dict[run], mtype="count", l_resol=l_resol)
+            return matrices
         
         else :
-            scores = {}
+            matrices = {}
             for run in l_run :
                 if run == "ref" :
-                    score = self.ref._scores(l_resol=l_resol, score_type=score_type)
+                    matrice = get_matrix(self.ref, mtype="count", l_resol=l_resol)
                 
-                score = self.comp_dict[run]._scores(l_resol=l_resol, score_type=score_type)
-                scores[run] = score
+                else :
+                    matrice = get_matrix(self.comp_dict[run], mtype="count", l_resol=l_resol)
+                
+                matrices[run] = matrice
             
-            return scores
+            return matrices
+
+
+    @property
+    def standard_dev_mat(self) -> Union[List[Dict[str, np.ndarray]], List[Dict[str, Dict[str, np.ndarray]]]]:
+        """
+        """
+        if self._standard_dev_mat is None :
+            matrices  = self.matrices()
+            ref = matrices.pop("ref")
+            
+            s_d_dict = {}
+            for run, obj in matrices.items() :
+                if isinstance(obj, dict) :
+                    s_d_dict[run] = {}
+                    for resol, mat in obj.items() :
+                        mat_val = mat.flatten()
+                        ref_val = ref[resol].flatten()
+                        slope, intercept, _, _, _ = linregress(mat_val, ref_val)
+                        regression_line = slope * ref_val + intercept
+
+                        s_d_dict[run][resol] = regression_line - ref_val
+                    
+                elif isinstance(obj, np.ndarray) :
+                    mat_val = obj.flatten()
+                    ref_val = ref.flatten()
+                    slope, intercept, _, _, _ = linregress(mat_val, ref_val)
+                    regression_line = slope * ref_val + intercept
+
+                    s_d_dict[run] = regression_line - ref_val
+
+            if isinstance(ref, np.ndarray) :
+                ref = ref.flatten() 
+            elif isinstance(ref, dict) :
+                ref = {resol : mat.flatten() for resol, mat in ref.items()}
+            else :
+                raise TypeError(f"The {type(ref)} is not supported for the reference... Exiting")
+            
+            self._standard_dev_mat = [s_d_dict, ref]
+
+        return self._standard_dev_mat
+
+
+    def standard_dev_score(self, 
+                           l_run: List[str] = None, 
+                           l_resol: List[str] = "all", 
+                           score_type: str = "insulation_count"
+                           ):
+        """
+        """
+        scores  = self.scores(l_run=l_run, l_resol=l_resol, score_type=score_type)
+        ref = scores.pop("ref")
+
+        s_d_dict = {}
+        for run, obj in scores.items() :
+            if isinstance(obj, dict) :
+                s_d_dict[run] = {}
+                for resol, score in obj.items() :
+                    ref_val = np.array(ref[resol])
+                    slope, intercept, _, _, _ = linregress(score, ref_val)
+                    regression_line = slope * ref_val + intercept
+
+                    s_d_dict[run][resol] = regression_line - ref_val
+                
+            if isinstance(obj, np.ndarray) :
+                ref_val = np.array(ref[resol])
+                slope, intercept, _, _, _ = linregress(obj, ref_val)
+                regression_line = slope * ref_val + intercept
+
+                s_d_dict[run] = regression_line - ref_val
+
+        return [s_d_dict, ref]
+
+    @property
+    def standard_dev_insul_count(self) -> Union[List[Dict[str, list]], List[Dict[str, Dict[str, list]]]] :
+        """
+        """
+        if self._standard_dev_insul_count is None :
+            self._standard_dev_insul_count = self.standard_dev_score()
+        
+        return self._standard_dev_insul_count
+
+    @property
+    def standard_dev_insul_correl(self) -> Union[List[Dict[str, list]], List[Dict[str, Dict[str, list]]]] :
+        """
+        """
+        if self._standard_dev_insul_correl is None :
+            self._standard_dev_insul_correl = self.standard_dev_score(score_type="insulation_correl")
+        
+        return self._standard_dev_insul_correl
+
+    @property
+    def standard_dev_PC1(self) -> Union[List[Dict[str, list]], List[Dict[str, Dict[str, list]]]] :
+        """
+        """
+        if self._standard_dev_PC1 is None :
+            self._standard_dev_PC1 = self.standard_dev_score(score_type="PC1")
+        
+        return self._standard_dev_PC1
 
 
     def heatmaps(self, 
@@ -1561,7 +1762,7 @@ class CompareMatrices():
         for key, matrix in self.comp_dict.items() :
             if self.region_ref != matrix.region :
                 raise ValueError("The %s Matrix do not have the same references as "
-                                 "the reference. Compatibility issues may occur." %key)
+                                 "the reference... Exiting." %key)
         
         method_name = inspect.currentframe().f_code.co_name
         
@@ -1575,23 +1776,26 @@ class CompareMatrices():
                 f = plt.figure(clear=True, figsize=(10, 10*(len(score_comp))))
                 ax = f.add_subplot(gs[0, 0])
 
-                alpha, color = 1, COLOR_CHART[score_type]
+                alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"][score_type]
                 if superposed :
-                    sup_param = SUPERPOSED_PARAMETERS[method_name]
-                    _alpha, _color = sup_param["alpha"], sup_param["color"][score_type]
+                    _alpha = SCATTER_PARAMETERS[method_name]["alpha"]
 
                 i=0
                 for key, score in score_comp.items() :
+                    score = phase_vectors(score, score_ref)
+
                     if not superposed and i >= 1:
                         ax = f.add_subplot(gs[i, 0])
                     
-                    if superposed :
-                        if "wtd" in [part.lower() for part in key.split("_")] :
+                    
+                    if "wtd" in [part.lower() for part in key.split("_")] :
+                        if superposed :
                             alpha = _alpha["wtd"]
-                            color = _color["wtd"]
-                        elif "rdm" in [part.lower() for part in key.split("_")] :
-                             alpha = _alpha["rdm"]
-                             color = _color["rdm"]
+                        color = _color["wtd"]
+                    elif "rdm" in [part.lower() for part in key.split("_")] :
+                            if superposed :
+                                alpha = _alpha["rdm"]
+                            color = _color["rdm"]
 
                     max_x = max(score_ref)
                     max_y = max(np.max(score_comp[key])
@@ -1612,7 +1816,7 @@ class CompareMatrices():
                     SSD = np.sum((score - regression_line) ** 2)
 
                     if i >= 1 or not superposed : 
-                        ax.plot(score, regression_line, color="black", label="Regression Line")
+                        ax.plot(regression_line, score_ref, color="black", label="Regression Line")
                     
                         ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
                                 transform=ax.transAxes, fontsize=12, verticalalignment='top',
@@ -1636,14 +1840,13 @@ class CompareMatrices():
                 f = plt.figure(clear=True, 
                                figsize=(10*len(score_ref), 20*(len(score_comp))))
                 
-                alpha, color = 1, COLOR_CHART[score_type]
+                alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"][score_type]
                 if superposed :
-                    sup_param = SUPERPOSED_PARAMETERS[method_name]
-                    _alpha, _color = sup_param["alpha"], sup_param["color"][score_type]
+                    _alpha = SCATTER_PARAMETERS[method_name]["alpha"] 
                 
                 legend_data = {}
                 i=0
-                for keys in reversed(score_comp.keys()) if superposed else score_comp.keys() :
+                for keys in score_comp.keys() :
                     j=0
                     for key in score_ref :
                         if i==0 :
@@ -1653,19 +1856,23 @@ class CompareMatrices():
                         elif superposed and i>=1 :
                             ax = f.axes[j]
                                                 
-                        if superposed :
-                            if "wtd" in [part.lower() for part in keys.split("_")] :
+                        
+                        if "wtd" in [part.lower() for part in keys.split("_")] :
+                            if superposed :
                                 alpha = _alpha["wtd"]
-                                color = _color["wtd"]
-                            elif "rdm" in [part.lower() for part in keys.split("_")] :
+                            color = _color["wtd"]
+                        elif "rdm" in [part.lower() for part in keys.split("_")] :
+                            if superposed :
                                 alpha = _alpha["rdm"]
-                                color = _color["rdm"]
-                            else : 
-                                raise NameError("To use the superposed mode, the names of the " \
-                                                "runs should include either 'wtd' or 'rdm'... Exiting")
+                            color = _color["rdm"]
+                        else : 
+                            raise NameError("To use the superposed mode, the names of the " \
+                                            "runs should include either 'wtd' or 'rdm'... Exiting")
                         
                         score = np.array(score_comp[keys][key])
                         ref = np.array(score_ref[key])
+                        
+                        score = phase_vectors(score, ref)
 
                         ax.plot(score, ref, "o", color=color, alpha=alpha)
                         
@@ -1685,7 +1892,7 @@ class CompareMatrices():
                             legend_data[key]["SSD"] = SSD
                             
                             if not superposed :
-                                ax.plot(ref, regression_line, color="black", label="Regression Line")
+                                ax.plot(regression_line, ref, color="black", label="Regression Line")
                             
                                 ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
                                         transform=ax.transAxes, fontsize=12, verticalalignment='top',
@@ -1705,7 +1912,7 @@ class CompareMatrices():
                                         
                         regression_line = data["reg_line"]
                         ref_values = data["ref_values"]
-                        ax.plot(ref_values, regression_line, color="black", label="Regression Line")
+                        ax.plot(regression_line, ref_values, color="black", label="Regression Line")
                         
                         corr_coeff = data["corr_coeff"]
                         SSD = data["SSD"]
@@ -1751,7 +1958,7 @@ class CompareMatrices():
         for key, matrix in self.comp_dict.items() :
             if self.region_ref != matrix.region :
                 raise ValueError("The %s Matrix do not have the same references as "
-                                 "the reference. Compatibility issues may occur." %key)
+                                 "the reference... Exiting." %key)
         
         method_name = inspect.currentframe().f_code.co_name
         indic = SMOOTH_MATRIX[method_name]
@@ -1767,26 +1974,29 @@ class CompareMatrices():
 
             ax = f.add_subplot(gs[0, 0])
 
-            alpha, color = 1, "black"
+            alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"]
             if superposed :
-                sup_param = SUPERPOSED_PARAMETERS[method_name]
-                _alpha, _color = sup_param["alpha"], sup_param["color"]
+                _alpha = SCATTER_PARAMETERS[method_name]["alpha"] 
 
             i=0
-            for key, values in reversed(comp.items()) if superposed else comp.items() :
+            for key, values in comp.items() :
+                values = phase_vectors(values, ref)
+
                 array_comp = np.array([values, ref])
                 array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
 
                 if not superposed and i >= 1:
                     ax = f.add_subplot(gs[i, 0])
                     
-                if superposed :
-                    if "wtd" in [part.lower() for part in key.split("_")] :
+                
+                if "wtd" in [part.lower() for part in key.split("_")] :
+                    if superposed :
                         alpha = _alpha["wtd"]
-                        color = _color["wtd"]
-                    elif "rdm" in [part.lower() for part in key.split("_")] :
+                    color = _color["wtd"]
+                elif "rdm" in [part.lower() for part in key.split("_")] :
+                    if superposed :
                         alpha = _alpha["rdm"]
-                        color = _color["rdm"]
+                    color = _color["rdm"]
 
                 
                 max_x = max(ref[key])
@@ -1809,7 +2019,7 @@ class CompareMatrices():
                     
                     SSD = np.sum((array_comp[0] - regression_line) ** 2)
                     
-                    ax.plot(array_comp[0], regression_line, color="red", label="Regression Line")
+                    ax.plot(regression_line, array_comp[1], color="red", label="Regression Line")
                 
                     ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
                             transform=ax.transAxes, fontsize=12, verticalalignment='top',
@@ -1843,14 +2053,13 @@ class CompareMatrices():
             f = plt.figure(clear=True, 
                            figsize=(10*len(ref), 20*(len(comp))))
             
-            alpha, color = 1, "k"
+            alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"]
             if superposed :
-                sup_param = SUPERPOSED_PARAMETERS[method_name]
-                _alpha, _color = sup_param["alpha"], sup_param["color"]
+                _alpha = SCATTER_PARAMETERS[method_name]["alpha"] 
             
             legend_data = {}
             i=0
-            for keys in reversed(comp.keys()) if superposed else comp.keys() :
+            for keys in comp.keys() :
                 j=0
                 for key in ref :
                     values = comp[keys][key]
@@ -1860,6 +2069,8 @@ class CompareMatrices():
                     ref_val = ref[key]
                     ref_val = ensure_numeric(ref_val)
                     validate_safe_cast(ref_val)
+                    
+                    values = phase_vectors(values, ref_val)
                     
                     array_comp = np.array([values, ref_val])
                     array_comp = array_comp[~np.isnan(array_comp).any(axis=1)]
@@ -1871,17 +2082,20 @@ class CompareMatrices():
                     elif superposed and i>=1 :
                         ax = f.axes[j]
                                                                 
-                    if superposed :
-                        if "wtd" in [part.lower() for part in keys.split("_")] :
+                    
+                    if "wtd" in [part.lower() for part in keys.split("_")] :
+                        if superposed :
                             alpha = _alpha["wtd"]
-                            color = _color["wtd"]
-                        elif "rdm" in [part.lower() for part in keys.split("_")] :
+                        color = _color["wtd"]
+                    elif "rdm" in [part.lower() for part in keys.split("_")] :
+                        if superposed :
                             alpha = _alpha["rdm"]
-                            color = _color["rdm"]
-                        else : 
-                            raise NameError("To use the superposed mode, the names of the " \
-                                            "runs should include either 'wtd' or 'rdm'... Exiting")
+                        color = _color["rdm"]
+                    else : 
+                        raise NameError("To use the superposed mode, the names of the " \
+                                        "runs should include either 'wtd' or 'rdm'... Exiting")
 
+                    if superposed :
                         max_x = max(ref[key])
                         max_y = max(np.max(comp[keys][key])
                                                 for keys in comp
@@ -1916,7 +2130,7 @@ class CompareMatrices():
                         legend_data[key]["SSD"] = SSD
                         
                         if not superposed :
-                            ax.plot(array_comp[1], regression_line, color="red", label="Regression Line")
+                            ax.plot(regression_line, array_comp[1], color="red", label="Regression Line")
                         
                             ax.text(0.05, 0.95, f"r = {corr_coeff:.2f}\nSSD = {SSD:.2f}",
                                     transform=ax.transAxes, fontsize=12, verticalalignment='top',
@@ -1936,7 +2150,7 @@ class CompareMatrices():
                                        
                     regression_line = data["reg_line"]
                     ref_values = data["ref_values"]
-                    ax.plot(ref_values, regression_line, color="red", label="Regression Line")
+                    ax.plot(regression_line, ref_values, color="red", label="Regression Line")
                     
                     corr_coeff = data["corr_coeff"]
                     SSD = data["SSD"]
@@ -2024,6 +2238,140 @@ class CompareMatrices():
                 score_type = "insulation_count"
             superposed = True
             ftype(outputfile, score_type, superposed)
+    
+
+    def specific_values_to_DataFrame(self,
+                                     data_type: str = "matrix",
+                                     standard_dev: bool = False,  
+                                     ref_name: str = "ref",
+                                     wanted_pattern: str = "wtd",
+                                     **kwargs):
+        """
+        """
+        wtd_count = sum(any("wtd" in part.lower() for part in keys.split("_"))
+                            for keys in self.comp_dict)
+        if wtd_count != 1 :
+            print(f" There are {wtd_count} runs with the wanted pattern")
+            raise NameError("There should be exactly one prediction associated to " \
+                            "the wanted mutation and its name should include " \
+                            f"'{wanted_pattern}'...Exiting")
+
+        if data_type == "matrix":
+            score_type = None
+            param  = SCATTER_PARAMETERS["correl_mat"]
+            
+            if standard_dev :
+                comp, ref = self.standard_dev_mat
+            
+            else :
+                comp = self.matrices(kwargs)
+
+                if isinstance(comp, np.ndarray) : 
+                    raise ValueError("There should be more than one array to be able " \
+                                    "to compare it.")
+                
+                elif isinstance(comp, Dict[str, Dict[str, np.ndarray]]) \
+                                and all([isinstance(run, dict) for run in comp]):
+                    comp = {names : 
+                                    {resol : matrix.flatten() 
+                                            for resol, matrix in run.items()} 
+                                                    for names, run in comp.items()}
+                    
+                elif isinstance(comp, Dict[str, np.ndarray]) \
+                                and all([isinstance(run, np.ndarray) for run in comp]) :
+                    comp = {names : matrix.flatten() for names, matrix in comp.items()}
+        
+        elif data_type == "score":
+            param = SCATTER_PARAMETERS["scores_regression"]
+            score_type = kwargs["score_type"] if "score_type" in kwargs.keys() else "insulation_count"
+
+            if standard_dev :
+                standard_dev_type = associate_score_to_standard_dev(score_type)
+                comp, ref = get_property(self, standard_dev_type)
+            
+            else : 
+                comp = self.scores(kwargs)
+
+                if isinstance(comp, list) : 
+                    raise ValueError("There should be more than one list of scores to " \
+                                    "be able to compare it.")
+
+        ref = comp.pop(ref_name) if not standard_dev else ref
+
+        data = []
+        for name in comp.keys():
+            if isinstance(ref, dict):
+                for resol in ref.keys():
+                    for val, ref_val in zip(comp[name][resol], ref[resol]) :
+                        line = [name, resol, data_type, val, ref_val, score_type, param]
+                        data.append(line)
+            
+            else :
+                for val, ref_val in zip(comp[name], ref) :
+                    line = [name, resol, data_type, val, ref_val, score_type, param]
+                    data.append(line)
+                    
+        data = pd.DataFrame(data, columns=["name", "resolution", "data_type", "values", 
+                                           "reference", "score_type", "plot_parameters"])
+
+        return data
+
+
+
+    def dispersion_plot(self, data_type: str = "matrix", merged: str = None, outputfile: str = None, **kwargs) :
+        """
+        """
+        df = self.specific_values_to_DataFrame(data_type=data_type, standard_dev=True, kwargs=kwargs)
+        df["values"] = abs(df["values"])
+
+        if merged is not None :
+            df["run_name"] = df["name"]
+            df["name"] = df["name"].apply(
+                                    lambda name: f"merged_{merged}" 
+                                                if merged.lower() in name.lower() 
+                                                else name)
+
+        resolutions = set()
+        for resol in df["resolution"]:
+            resolutions.add(resol)
+        resolutions = sorted(resolutions, key=lambda x: int(x.rstrip('Mb')))
+
+        names = set()
+        for name in df["name"]:
+            names.add(name)
+        names = list(names)
+
+        n = len(self.comp_dict)
+        
+        gs = GridSpec(nrows=len(resolutions), ncols=1)
+        f = plt.figure(clear=True, figsize=(10*n, 100))
+
+        for i, resol in enumerate(resolutions) :
+            data = df[df["resolution"]==resol]
+            ax = f.add_subplot(gs[i, 0])
+
+            if data_type == "matrix" :
+                if len(names) == 2 :
+                    split = True
+                else :
+                    split = False
+                
+                violinplot(data=data, x="name", y="values", hue="name", ax=ax, split=split, 
+                           inner="quarter", gap=.01, palette="pastel", legend="auto")
+                ax.set_title(f"Violinplot_mat_values_{resol}")
+
+            elif data_type == "score" :
+                score_type = kwargs["score_type"] if "score_type" in kwargs.keys() else "insulation_count"
+                palette = color_palette(palette=DISPERSION_COLOR[score_type], n_colors=len(names))
+
+                swarmplot(data=data, x="name", y="values", hue="name", ax=ax, 
+                          palette=palette, size=2, legend="auto")
+                ax.set_title(f"Jitterplot_{score_type}_{resol}")
+        
+        if outputfile: 
+            plt.savefig(outputfile)
+        else:
+            plt.show()
         
 
 
@@ -2211,7 +2559,4 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
                         "are supported...Exiting.")
     
     return CompareMatrices(ref, comp)
-
-
-
 
