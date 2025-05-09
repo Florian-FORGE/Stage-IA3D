@@ -32,7 +32,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-from config import EXTREMUM_HEATMAP, COLOR_CHART, WHICH_MATRIX, SMOOTH_MATRIX, TLVs_HEATMAP, SCATTER_PARAMETERS, DISPERSION_COLOR
+from config import config_data
 
 
 """
@@ -153,6 +153,33 @@ def get_obs_over_exp(mat):
     return OE
 
 
+def _get_insulation_score(m: Union[list, np.ndarray], 
+                              w: int = 5) -> list :
+        n = len(m)
+        scores = []
+
+        for i in range(w, (n-w)):
+            s = 0
+            nv = 0
+            for j in range(i-w, i+w+1):
+                if np.isfinite(m[i,j]):
+                    s+=m[i,j]
+                    nv+=1
+            if nv == 0 :
+                score = np.nan
+            else :
+                score = s/nv
+            scores.append(score)
+        
+        for i in range(n-2*w):
+            if np.isnan(scores[i]) :
+                scores[i] = np.nanmean(scores[min(0, i-w) : max(i+w, n-1)])
+        
+        decal = [np.mean(scores) for i in range(w)]
+        scores = decal  + scores
+
+        return scores
+
 def format_ticks(ax: axes, 
                  x: bool =True, 
                  y: bool =True, 
@@ -170,7 +197,7 @@ def format_ticks(ax: axes,
     if rotate:
         ax.tick_params(axis='x',rotation=45)
 
-def replace_nan_with_neighbors_mean(arr):
+def replace_nan_with_neighbors_mean(arr: Union[list, np.ndarray]):
     """
     Function to replace NaN values in either a list or a numpy ndarray with the 
     mean of their neighbors. The function handles the edge cases where the NaN 
@@ -178,7 +205,7 @@ def replace_nan_with_neighbors_mean(arr):
     available  neighbors (at most it uses the three preceding and succeeding 
     values, and in a square for ndarray objects).
     """
-    if isinstance(arr, np.ndarray) :
+    if isinstance(arr, np.ndarray) and arr.ndim == 2:  # Check if arr is a 2D array
         n = arr.shape[0]
         for i in range(n) :
             for j in range(n) :
@@ -201,7 +228,8 @@ def replace_nan_with_neighbors_mean(arr):
                             neighbors.append(arr[i, j+1])
 
                     arr[i] = np.nanmean(neighbors) if neighbors is not None else 0
-    else :
+    
+    elif isinstance(arr, (list, np.ndarray)) and np.array(arr).ndim == 1:  # Check if arr is 1D 
         arr = np.array(arr)
         for i in range(len(arr)):
             if np.isnan(arr[i]):
@@ -218,6 +246,10 @@ def replace_nan_with_neighbors_mean(arr):
                         neighbors = [arr[i + 1]]
                 
                 arr[i] = np.nanmean(neighbors) if neighbors is not None else 0
+    
+    else :
+        raise TypeError("The array should be either 1D or 2D. Not supported...Exiting.")
+    
     return arr
 
 
@@ -330,7 +362,7 @@ class Matrix():
     # Class-level constants
     @classmethod
     def get_extremum_heatmap(cls):
-        VMIN, VMAX = EXTREMUM_HEATMAP[cls.__name__]
+        VMIN, VMAX = config_data["EXTREMUM_HEATMAP"][cls.__name__]
         return VMIN, VMAX
 
     @classmethod
@@ -339,7 +371,7 @@ class Matrix():
         Class method to get the right matrix depending from the class used.
         (e.g. if the class is RealMatrix then the log_obs_o_exp is used).
         """
-        return WHICH_MATRIX[cls.__name__][mtype]
+        return config_data["WHICH_MATRIX"][cls.__name__][mtype]
 
 
     def __init__(self, region: list, resolution: str, genome: str, gtype: str = "wt"):
@@ -356,7 +388,66 @@ class Matrix():
         self._PC1 = None
                 
     
-    def _get_insulation_score(self,
+    def get_count_insulation_score(self,
+                              w: int = 5
+                              ) -> list :
+        """
+        Method to compute the insulation scores, in a list. This scores 
+        are computed in the count matrix.
+        They are stored in a list in this order.
+        
+        Parameters :
+            - w : int
+                half the calculation window size (e.g. w=5 means that 
+                we use the 5 values before and after plus the bin value 
+                for each bin where it is possible)
+                                
+        Returns :
+            scores : list of the calculated scores with the w first values being 
+                     the mean of the scores (this values are added for adjusting 
+                     the plots)  
+        """
+        m = get_property(self, self.which_matrix("count"))
+        
+        scores = _get_insulation_score(m=m, w=w)
+        
+        return scores
+    
+    def get_correl_insulation_score(self,
+                              w: int = 5
+                              ) -> list :
+        """
+        Method to compute the insulation scores, in a list. This scores 
+        are computed in the correl matrix.
+        They are stored in a list in this order.
+        
+        Parameters :
+            - w : int
+                half the calculation window size (e.g. w=5 means that 
+                we use the 5 values before and after plus the bin value 
+                for each bin where it is possible)
+                                
+        Returns :
+            scores : list of the calculated scores with the w first values being 
+                     the mean of the scores (this values are added for adjusting 
+                     the plots)  
+        """
+        m = get_property(self, self.which_matrix("correl"))
+        
+        m = replace_nan_with_neighbors_mean(m)
+        method_name = inspect.currentframe().f_code.co_name
+        indic = config_data["SMOOTH_MATRIX"][method_name]
+        
+        m = gaussian_filter(m, sigma=indic["val"][self.__class__.__name__]) if indic["bool"] else m
+        m = (m - np.min(m)) / (np.max(m) - np.min(m))
+        m = np.corrcoef(m)
+
+        scores = _get_insulation_score(m=m, w=w)
+        
+        return scores
+
+
+    def get_insulation_score(self,
                               w: int = 5, 
                               mtype: str = "count"
                               ) -> list :
@@ -380,66 +471,60 @@ class Matrix():
                      the mean of the scores (this values are added for adjusting 
                      the plots)  
         """
-        m = get_property(self, self.which_matrix(mtype))
-        
         if mtype == "count" :
-            pass
+            scores = self.get_count_insulation_score(w=w)
+
         elif mtype == "correl" :
-            m = replace_nan_with_neighbors_mean(m)
-            method_name = inspect.currentframe().f_code.co_name
-            indic = SMOOTH_MATRIX[method_name]
-            
-            if isinstance(self, OrcaMatrix) :
-                m = gaussian_filter(m, sigma=indic["val"]["OrcaMatrix"]) if indic["bool"] else m
-                m = (m - np.min(m)) / (np.max(m) - np.min(m))
-                m = np.exp(m)
-            else :
-                m = gaussian_filter(m, sigma=indic["val"][self.__class__.__name__]) if indic["bool"] else m
-                m = (m - np.min(m)) / (np.max(m) - np.min(m))
-            m = np.corrcoef(m)
+            scores = self.get_correl_insulation_score(w=w)
+        
         else :
             raise TypeError(f"{mtype} is not a valid matrix type for the "
                             "insulation score calculations. "
                             "Choose between 'count' and 'correl' for "
                             "count or correlation matrices.")
         
-        n = len(m)
-        scores = []
-        for i in range(w, (n-w)):
-            s = 0
-            nv = 0
-            for j in range(i-w, i+w+1):
-                if np.isfinite(m[i,j]):
-                    s+=m[i,j]
-                    nv+=1
-            if nv == 0 :
-                score = np.nan
-            else :
-                score = s/nv
-            scores.append(score)
-        
-        for i in range(n-2*w):
-            if np.isnan(scores[i]) :
-                scores[i] = np.nanmean(scores[min(0, i-w) : max(i+w, n-1)])
-        
-        decal = [np.mean(scores) for i in range(w)]
-        scores = decal  + scores
-
         return scores
     
     @property
     def insulation_count(self):
         if not self._insulation_count:
-            self._insulation_count = self._get_insulation_score()
+            self._insulation_count = self.get_insulation_score()
         return self._insulation_count
     
     @property
     def insulation_correl(self):
         if not self._insulation_correl:
-            self._insulation_correl = self._get_insulation_score(mtype="correl")
+            self._insulation_correl = self.get_insulation_score(mtype="correl")
         return self._insulation_correl
 
-    def _get_phasing_track(self, genome_path: str = None) :
+
+    def get_ref_genome_path(self, genome_path: str = None) :
+        """
+        """
+        if genome_path is None :
+            if not os.path.isabs(self.refgenome):
+                if not self.refgenome.split('/')[-1] == "sequence" :
+                    genome_path = f"./{self.refgenome}/sequence.fa"
+                else :
+                    genome_path = f"./{self.refgenome}"
+            else :
+                genome_path = self.refgenome
+        
+        if genome_path.startswith("./"):
+            genome_path = genome_path[2:]
+        if not os.path.isabs(genome_path):
+            try :
+                base_path = os.path.abspath(genome_path)
+            except :
+                base_path = os.path.abspath(config_data["BASE_PATH_GENOME"])
+            genome_path = os.path.join(base_path, genome_path)
+        if not genome_path.endswith(".fa"):
+            genome_path += ".fa"
+
+        return genome_path
+
+
+    def get_phasing_track(self, genome_path: str = None) :
         """
         Method to compute the GC content that can be used as a phasing 
         track. This returns a DataFrame with each line corresponding to 
@@ -458,22 +543,7 @@ class Matrix():
         
         bins = pd.DataFrame(bins)
         
-        if genome_path is None :
-            if not os.path.isabs(self.refgenome):
-                if not self.refgenome.split('/')[-1] == "sequence" :
-                    genome_path = f"./{self.refgenome}/sequence.fa"
-                else :
-                    genome_path = f"./{self.refgenome}"
-            else :
-                genome_path = self.refgenome
-        
-        if genome_path.startswith("./"):
-            genome_path = genome_path[2:]
-        if not os.path.isabs(genome_path):
-            base_path = "/home/fforge/Stage-IA3D/notebooks/resources/genome"
-            genome_path = os.path.join(base_path, genome_path)
-        if not genome_path.endswith(".fa"):
-            genome_path += ".fa"
+        genome_path = self.get_ref_genome_path(genome_path=genome_path)
 
         genome = bioframe.load_fasta(genome_path, engine="pyfaidx")
 
@@ -481,7 +551,7 @@ class Matrix():
 
         return gc_cov
 
-    def _get_PC1(self, genome_path: str = None) -> list :
+    def get_PC1(self, genome_path: str = None) -> list :
         """
         Method to compute the PC1 values for the matrix using the 
         cis_eig() method from cooltools. They are stored in a list.
@@ -496,21 +566,12 @@ class Matrix():
         if isinstance(self, OrcaMatrix) :
             A = np.exp(A)
             
-        phasing_track = self._get_phasing_track(genome_path=genome_path)["GC"].values
+        phasing_track = self.get_phasing_track(genome_path=genome_path)["GC"].values
                     
         _, pc1 = cis_eig(A = A, n_eigs = 1, phasing_track=phasing_track)
         
-        # _, pc1 = cis_eig(A = A, n_eigs = 1)
-
-        
         pc1 = pc1[0]
         pc1 = replace_nan_with_neighbors_mean(list(pc1))
-        
-        # max_abs_indice = np.argmax(np.abs(pc1))
-        # sign = np.sign(pc1[max_abs_indice])
-        
-        # if sign == -1 :
-        #     pc1 = np.multiply(pc1, -1)
         
         self._PC1 = pc1.tolist()
         return pc1.tolist()
@@ -518,11 +579,11 @@ class Matrix():
     @property
     def PC1(self):
         if self._PC1 is None:
-            self._PC1 = self._get_PC1()
+            self._PC1 = self.get_PC1()
         return self._PC1
 
     @property 
-    def available_scores(self):
+    def scores(self):
         return {"insulation_count" : self.insulation_count, "insulation_correl" : self.insulation_correl, "PC1" : self.PC1}
 
 
@@ -530,7 +591,7 @@ class Matrix():
         """
         Method to get the bin corresponding to a given position (0-based)
         """
-        start, end = self.region[1], self.region[2]
+        start, end = self.region
         bin_range = (end - start)//len(self.obs_o_exp)
         return (position - start)//bin_range
     
@@ -538,7 +599,7 @@ class Matrix():
         """
         Method to get the bin corresponding to a given position list [start, end] (0-based)
         """
-        start, end = self.region[1], self.region[2]
+        start, end = self.region
         bin_range = (end - start)//len(self.obs_o_exp)
         return [(positions[0] - start)//bin_range, (positions[1] - start)//bin_range]
   
@@ -546,7 +607,7 @@ class Matrix():
         """
         Method to get the position corresponding to a given bin (0-based)
         """
-        start, end = self.region[1], self.region[2]
+        start, end = self.region
         bin_range = (end - start)//len(self.obs_o_exp)
         return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
 
@@ -568,6 +629,7 @@ class Matrix():
         """
         bp_formatter = EngFormatter('b', places=1)
         
+        # Get the start positions of 6 evenly spaced (from 0 to 246) bins to be axis values
         p_val = [self.bin2positions(0)[0]] \
                 + [self.bin2positions(i)[0] for i in range(49,250,50)]
         f_p_val = ['%sb' %bp_formatter.format_eng(value) for value in p_val]
@@ -579,19 +641,14 @@ class Matrix():
         return f_p_val, titles, cmap
        
     def heatmap(self,
-                 gs: GridSpec,
-                 f: figure.Figure,
-                 output_file: str = None, 
-                 vmin: float = None, 
-                 vmax: float = None, 
-                 i: int = 0, 
-                 j: int = 0,
-                 name: str = None,
-                 show: bool = True, 
-                 compartment: bool = False,
-                 genome_path: str = None
-                 ):
-        
+                gs: GridSpec,
+                f: figure.Figure,
+                i: int = 0, 
+                j: int = 0,
+                vmin: float = None, 
+                vmax: float = None, 
+                name: str = None,
+                ):
         """
         Method to produce the heatmap associated to the obs_o_exp.
         
@@ -601,47 +658,32 @@ class Matrix():
             the grid layout to place subplots within a figure.
         - f : figure.Figure
             the object that holds all plot elements.
-        - outputfile : str
-            the path to the file in which the heatmaps should be saved.
-            If None, then the heatmaps are plotted.
+        - i : int
+            the line in which the heatmap should plotted.
+        - j : int
+            the column in which the heatmap should be plotted.
         - vmin : float
             the minimal value represented on the heatmap. All the 
             values under it will be deemed to be equal to it.
         - vmax : float
             the maximal value represented on the heatmap. All the 
             values over it will be deemed to be equal to it.
-        - i : int
-            the line in which the heatmap should plotted.
-        - j : int
-            the column in which the heatmap should be plotted.
         - name : str
             a name associated to the matrix (mostly used when the Matrix
             object is part of a CompareMatrices object).
-        - show : bool
-            whether to plot the heatmap in case there is no output_file. 
-            If True, then there is a plot. By default, show = True.
-        - compartment : bool
-            whether to plot the compartmentalization of the matrix (determined
-            by the PC1 values). If True, then the compartmentalization is 
-            plotted. By default, compartment = False.
-        - genome_path : str
-            the path to the reference genome to use for getting
-            the right phasing_track.
-        
+                
         Returns
         ----------
-         None
+         ax : figure.Axes
+            the object that holds the plot elements of the heatmap.
 
          Side effects
          ----------
-         - If there is no outputfile and show==True, shows the heatmap.
-         - If there is an outputfile, saves the heatmap in the file.
-         """
+         Produces the heatmap associated to the count matrix of Matrix object.
+        """
         if not vmin and not vmax :
             vmin, vmax = self.get_extremum_heatmap()
 
-        TLVs = TLVs_HEATMAP[self.__class__.__name__]
-        
         f_p_val, titles, cmap = self.formatting(name)
 
         ax = f.add_subplot(gs[i, j])
@@ -665,9 +707,45 @@ class Matrix():
         ax.set_xticks([0, 50, 100, 150, 200, 250])
         ax.set_xticklabels(f_p_val)
         format_ticks(ax, x=False, y=False)
+        
+        return ax
+    
+    def surcharge_heatmap(self,
+                          ax: axes,
+                          compartment: bool = False,
+                          genome_path: str = None,
+                          mutation: bool = False,
+                          ):
+        
+        """
+        Method to produce the heatmap associated to the obs_o_exp.
+        
+        Parameters
+        ----------
+        - ax : axes
+            the object that holds the plot elements of the heatmap.
+        - compartment : bool
+            whether to plot the compartmentalization of the matrix (determined
+            by the PC1 values). If True, then the compartmentalization is 
+            plotted. By default, compartment = False.
+        - genome_path : str
+            the path to the reference genome to use for getting the right 
+            phasing_track to use for compartment representation.
+        
+        Returns
+        ----------
+         None
 
+         Side effects
+         ----------
+         Surcharges the heatmap with the relevent data represented.
+         """
+        TLVs = config_data["TLVs_HEATMAP"][self.__class__.__name__]
+        
+        m = get_property(self, self.which_matrix())
+        
         if compartment:
-            pc1 = self._get_PC1(genome_path=genome_path)
+            pc1 = self.get_PC1(genome_path=genome_path)
             rows, cols = m.shape
 
             for i in range(1, len(pc1) - 1):
@@ -686,8 +764,32 @@ class Matrix():
                         ax.plot([0, cols-1], [i, i], color="gray", lw=1)
                     if 0 <= i < cols:  
                         ax.plot([i, i], [0, rows-1], color="gray", lw=1)
-                                                                               
 
+        if mutation :
+            mut_pos = None # I need to decide where this information will be stored to get it here
+            # I also need to determine which kind of surcharge would be best to apply
+                                                                               
+    def heatmap_plot(self,
+                     gs: GridSpec,
+                     f: figure.Figure,
+                     i: int = 0, 
+                     j: int = 0,
+                     vmin: float = None, 
+                     vmax: float = None, 
+                     name: str = None,
+                     compartment: bool = False,
+                     genome_path: str = None,
+                     mutation: bool = False,
+                     output_file: str = None,
+                     show: bool = False
+                     ):
+        """
+        """
+        ax = self.heatmap(gs=gs, f=f, i=i, j=j, vmin=vmin, vmax=vmax, name=name)
+
+        self.surcharge_heatmap(ax=ax, compartment=compartment, genome_path=genome_path, 
+                               mutation=mutation)
+        
         if output_file: 
             plt.savefig(output_file, transparent=True)
         elif show==True:
@@ -727,7 +829,7 @@ class Matrix():
 
         score = get_property(self, score_type)
         ax.set_xlim(0, 250)
-        ax.plot(score, color=COLOR_CHART[score_type])
+        ax.plot(score, color=config_data["COLOR_CHART"][score_type])
         ax.set_ylabel("%s" % score_type)
         ax.set_xticks([0,50,100,150,200,250])
         ax.set_xticklabels(f_p_val)
@@ -825,7 +927,9 @@ class OrcaMatrix(Matrix):
     def expect(self):
         if self._expect is None :
             expect = np.zeros(self.obs_o_exp.shape)
-            values = self.normmat
+            values = self.normmat[0]
+            # We sometimes only get a vector and not an array in normmat, 
+            # so  in any case we take the first line to create the array.
             
             for i, val in enumerate(values) :
                 if i == 0 :
@@ -854,6 +958,20 @@ class OrcaMatrix(Matrix):
     def get_genome(self):
         return self.genome
 
+    def get_correl_insulation_score(self, w = 5):
+        m = get_property(self, self.which_matrix("correl"))
+        
+        m = replace_nan_with_neighbors_mean(m)
+        method_name = inspect.currentframe().f_code.co_name
+        indic = config_data["SMOOTH_MATRIX"][method_name]
+        
+        m = gaussian_filter(m, sigma=indic["val"]["OrcaMatrix"]) if indic["bool"] else m
+        m = (m - np.min(m)) / (np.max(m) - np.min(m))
+        m = np.exp(m)
+
+        scores = _get_insulation_score(m=m, w=w)
+        
+        return scores
 
 
 
@@ -975,8 +1093,8 @@ class RealMatrix(Matrix):
         return self._log_obs_o_exp
     
 
-    def get_coolfile(self):
-        return self.coolfile
+    def get_coolpath(self):
+        return self.coolpath
 
 
 
@@ -1024,7 +1142,7 @@ class MatrixView():
         for key, value in self.di.items():
             value._save_scores(output_scores=output_scores, 
                                list_scores_types=list_scores_types, 
-                               prefix=prefixes[i])
+                               prefix=prefixes[i] if prefixes is not None else None)
             i+=1
 
     def _heatmaps(self, 
@@ -1038,8 +1156,8 @@ class MatrixView():
                   genome_path: str = None):
         j=j
         for key, value in self.di.items() :
-            value.heatmap(gs=gs, f=f, i=i, j=j, name=name, show=show, 
-                          compartment=compartment, genome_path=genome_path)
+            value.heatmap_plot(gs=gs, f=f, i=i, j=j, name=name, show=show, 
+                               compartment=compartment, genome_path=genome_path)
             j+=1
 
     def _score_plot_(self,
@@ -1059,7 +1177,7 @@ class MatrixView():
                               j=j)
             j+=1
 
-    def _scores(self, l_resol: List[str], score_type: str = "insulation_count") -> Union[list, Dict[str, list]]:
+    def _scores(self, l_resol: List[str] = None, score_type: str = "insulation_count") -> Dict[str, list]:
         """
         Method to retrieve the scores of the score_type type for every 
         resolution given in the l_resol list. If there is only one given 
@@ -1068,12 +1186,10 @@ class MatrixView():
         returned in a dictionary associated with the associated resolution 
         as key.
         """
-        if len(l_resol) == 1 :
-            resol = l_resol[0]
-            scores = get_property(self.di[resol], score_type)
-            return scores
+        if l_resol is None :
+            l_resol = [resol for resol in self.di.keys()]
         
-        elif len(l_resol) > 1 :
+        if len(l_resol) >= 1 :
             scores = {}
             for resol in l_resol :
                 score = get_property(self.di[resol], score_type)
@@ -1776,9 +1892,9 @@ class CompareMatrices():
                 f = plt.figure(clear=True, figsize=(10, 10*(len(score_comp))))
                 ax = f.add_subplot(gs[0, 0])
 
-                alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"][score_type]
+                alpha, _color = 1, config_data["SCATTER_PARAMETERS"][method_name]["color"][score_type]
                 if superposed :
-                    _alpha = SCATTER_PARAMETERS[method_name]["alpha"]
+                    _alpha = config_data["SCATTER_PARAMETERS"][method_name]["alpha"]
 
                 i=0
                 for key, score in score_comp.items() :
@@ -1840,9 +1956,9 @@ class CompareMatrices():
                 f = plt.figure(clear=True, 
                                figsize=(10*len(score_ref), 20*(len(score_comp))))
                 
-                alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"][score_type]
+                alpha, _color = 1, config_data["SCATTER_PARAMETERS"][method_name]["color"][score_type]
                 if superposed :
-                    _alpha = SCATTER_PARAMETERS[method_name]["alpha"] 
+                    _alpha = config_data["SCATTER_PARAMETERS"][method_name]["alpha"] 
                 
                 legend_data = {}
                 i=0
@@ -1961,7 +2077,7 @@ class CompareMatrices():
                                  "the reference... Exiting." %key)
         
         method_name = inspect.currentframe().f_code.co_name
-        indic = SMOOTH_MATRIX[method_name]
+        indic = config_data["SMOOTH_MATRIX"][method_name]
 
         if isinstance(self.ref, Matrix) :
             ref = get_property(self.ref, self.ref.which_matrix()).flatten()
@@ -1974,9 +2090,9 @@ class CompareMatrices():
 
             ax = f.add_subplot(gs[0, 0])
 
-            alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"]
+            alpha, _color = 1, config_data["SCATTER_PARAMETERS"][method_name]["color"]
             if superposed :
-                _alpha = SCATTER_PARAMETERS[method_name]["alpha"] 
+                _alpha = config_data["SCATTER_PARAMETERS"][method_name]["alpha"] 
 
             i=0
             for key, values in comp.items() :
@@ -2053,9 +2169,9 @@ class CompareMatrices():
             f = plt.figure(clear=True, 
                            figsize=(10*len(ref), 20*(len(comp))))
             
-            alpha, _color = 1, SCATTER_PARAMETERS[method_name]["color"]
+            alpha, _color = 1, config_data["SCATTER_PARAMETERS"][method_name]["color"]
             if superposed :
-                _alpha = SCATTER_PARAMETERS[method_name]["alpha"] 
+                _alpha = config_data["SCATTER_PARAMETERS"][method_name]["alpha"] 
             
             legend_data = {}
             i=0
@@ -2258,7 +2374,7 @@ class CompareMatrices():
 
         if data_type == "matrix":
             score_type = None
-            param  = SCATTER_PARAMETERS["correl_mat"]
+            param  = config_data["SCATTER_PARAMETERS"]["correl_mat"]
             
             if standard_dev :
                 comp, ref = self.standard_dev_mat
@@ -2282,7 +2398,7 @@ class CompareMatrices():
                     comp = {names : matrix.flatten() for names, matrix in comp.items()}
         
         elif data_type == "score":
-            param = SCATTER_PARAMETERS["scores_regression"]
+            param = config_data["SCATTER_PARAMETERS"]["scores_regression"]
             score_type = kwargs["score_type"] if "score_type" in kwargs.keys() else "insulation_count"
 
             if standard_dev :
@@ -2362,7 +2478,7 @@ class CompareMatrices():
 
             elif data_type == "score" :
                 score_type = kwargs["score_type"] if "score_type" in kwargs.keys() else "insulation_count"
-                palette = color_palette(palette=DISPERSION_COLOR[score_type], n_colors=len(names))
+                palette = color_palette(palette=config_data["DISPERSION_COLOR"][score_type], n_colors=len(names))
 
                 swarmplot(data=data, x="name", y="values", hue="name", ax=ax, 
                           palette=palette, size=2, legend="auto")

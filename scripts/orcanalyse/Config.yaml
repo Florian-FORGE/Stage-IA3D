@@ -19,6 +19,10 @@ WHICH_MATRIX:
     count: log_obs_o_exp
     correl: obs
 
+REF_GENOME: ../notebooks/resources/genome/Homo_sapiens.GRCh38.dna.primary_assembly/sequence.fa
+
+BASE_PATH_GENOME: ../notebooks/resources/genome
+
 SMOOTH_MATRIX:
   _get_insulation_score:
     bool: false
