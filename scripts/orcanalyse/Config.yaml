@@ -66,4 +66,5 @@ SCATTER_PARAMETERS:
 DISPERSION_COLOR:
   insulation_count: "ch:s=2.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
   PC1: "ch:s=1.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
-  insulation_correl: "ch:s=0.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
+  insulation_correl: "ch:s=.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
+  default: "ch:s=0, rot=3, dark=.6, light=.4, hue=2, gamma=1.75"

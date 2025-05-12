@@ -41,7 +41,7 @@ def read_mutations_from_BED(mutationfile,
                             sequence: str =".", 
                             relative: bool = False, 
                             start: int = None,
-                            end: int = None):
+                            end: int = None) -> List[Mutation] :
     """ Read a .bed file and strores the associated BedInterval in a list"""
     intervals = []
     with open(mutationfile, "r") as fin:
@@ -76,7 +76,7 @@ def read_mutations_from_BED(mutationfile,
 def read_mutations_from_tsv(mutationfile, 
                             relative: bool = False, 
                             start: int = None,
-                            end: int = None):
+                            end: int = None) -> List[Mutation] :
     """ Read a database describing mutations and stores the needed informations in a list"""
     if relative and start and end:
         l = sorted_lines
