@@ -8,6 +8,7 @@ COLOR_CHART:
   PC1: green
   insulation_correl: red
 
+# TF Dificile à comprendre....
 WHICH_MATRIX:
   Matrix:
     count: _obs_o_exp
@@ -23,6 +24,7 @@ REF_GENOME: ../notebooks/resources/genome/Homo_sapiens.GRCh38.dna.primary_assemb
 
 BASE_PATH_GENOME: ../notebooks/resources/genome
 
+# TF not recommended to put function names in a configuration file
 SMOOTH_MATRIX:
   _get_insulation_score:
     bool: false

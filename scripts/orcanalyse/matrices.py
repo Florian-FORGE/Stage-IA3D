@@ -445,7 +445,7 @@ class Matrix():
         
         return scores
 
-
+    # TF OK c'est parfait
     def get_insulation_score(self,
                               w: int = 5, 
                               mtype: str = "count"
@@ -522,7 +522,7 @@ class Matrix():
 
         return genome_path
 
-
+    # TF c'est parfait
     def get_phasing_track(self, genome_path: str = None) :
         """
         Method to compute the GC content that can be used as a phasing 
@@ -550,6 +550,7 @@ class Matrix():
 
         return gc_cov
 
+    # TF Agin isinstance here is not necessary !
     def get_PC1(self, genome_path: str = None) -> list :
         """
         Method to compute the PC1 values for the matrix using the 
@@ -738,6 +739,8 @@ class Matrix():
         
         return ax
     
+    # TF What do you mean by surcharge ? OK, I understand
+    # TF compartments_overlay ?
     def surcharge_heatmap(self,
                           ax: axes,
                           compartment: bool = False,
@@ -959,7 +962,9 @@ class OrcaMatrix(Matrix):
             expect = np.zeros(self.obs_o_exp.shape)
             values = self.normmat[0]
             # We sometimes only get a vector and not an array in normmat, 
-            # so  in any case we take the first line to create the array.
+            # so in any case we take the first line to create the array.
+            # TF we always get an 2D array, should a test on the dimensionshould be made
+            # self.normmat.ndim, and the first row should explicitely extracted self.normmat[0,:]
             
             for i, val in enumerate(values) :
                 if i == 0 :
@@ -1497,6 +1502,9 @@ class CompareMatrices():
         return self._standard_dev_mat
 
 
+    # TF again an isinstance is detected
+    # TF Careful, this function can return different type of object (dict or dict of dict)
+    # TF A documentation is needed
     def standard_dev_score(self, 
                            l_run: List[str] = None, 
                            l_resol: List[str] = "all", 
@@ -1519,6 +1527,7 @@ class CompareMatrices():
                 
         return [s_d_dict, ref]
 
+    # TF I am not very comfortable with a function returning such a complicated type.
     @property
     def standard_dev_insul_count(self) -> List[Dict[str, Dict[str, list]]] :
         """
@@ -1546,7 +1555,7 @@ class CompareMatrices():
         
         return self._standard_dev_PC1
 
-
+    # TF Again isinstance
     def heatmaps(self, 
                  output_file: str = None, 
                  names: list = None, 
@@ -1755,7 +1764,9 @@ class CompareMatrices():
             
         pdf.close()
 
-
+    # TF The function is way too long
+    # TF I have detected an isinstance....this is probably the reason
+    # TF is stacked a better optional argument name (rather the superposed)?
     def scores_regression(self,
                           output_file: str = None,
                           score_type: str = "insulation_count",
@@ -1896,7 +1907,8 @@ class CompareMatrices():
             else:
                 plt.show()
 
-
+    # TF the function is too long !!
+    # TF again isinstance detected ....this is probably the reason
     def correl_mat(self, outputfile: str = None, superposed: bool = False) :
         """
         Method that compares each value of each matrix in the comp_dict 
@@ -2133,7 +2145,7 @@ class CompareMatrices():
             superposed = True
             ftype(outputfile, score_type, superposed)
     
-
+    # TF probably not the best name for this function
     def specific_values_to_DataFrame(self,
                                      data_type: str = "matrix",
                                      standard_dev: bool = False,  
