@@ -178,7 +178,7 @@ def generate_random_mutations_old(mutations: List[Mutation],
         length = mut.end - mut.start
 
         if rdm_seed:
-            rdm.seed(rdm_seed+i**2)
+            rdm.seed(1/(rdm_seed+i**2))
         
         start = rdm.randint(intervals[chrom][0], intervals[chrom][1])
 
@@ -186,7 +186,7 @@ def generate_random_mutations_old(mutations: List[Mutation],
         forbid = forbid_pos.keys()
         while (start in forbid) or (start+length in forbid) or ((start in forbid) and (start+length in forbid)) :
             j+=1
-            rdm.seed(rdm_seed+i**2+j**2)
+            rdm.seed(1/(rdm_seed+i**2+j**2))
             start = rdm.randint(intervals[chrom][0], intervals[chrom][1])
 
         end = start + length
@@ -236,7 +236,7 @@ def generate_random_mutations(mutations: List[Mutation],
             chromlen = chromsize if chromsize is not None else len(fasta_handle[chr])
             fs.write(f"{chr}\t{chromlen}\n")
 
-    rdm_bed = bed.shuffle(g=f"{dir}/chrom_size.csv", seed=rdm_seed)
+    rdm_bed = bed.shuffle(g=f"{dir}/chrom_size.csv", seed=1/rdm_seed)
 
     intervals = []
     for line in rdm_bed:
@@ -250,7 +250,7 @@ def generate_random_mutations(mutations: List[Mutation],
     return intervals
 
 
-def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0, extend_to: bool = False):
+def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0) :
     
     if bed:
         mutations = read_mutations_from_BED(bed, mutationtype)
