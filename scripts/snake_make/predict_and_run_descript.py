@@ -92,7 +92,7 @@ def predict_and_orcarun_descript(chrom: str,
                     f"{name}", 
                     f"{mut_path.split('/')[-1]}", 
                     f"MatrixView", 
-                    f"{ref_fasta.split('/')[-2]}", 
+                    f"{ref_fasta}", 
                     f"OrcaMatrix", 
                     f"{trace_path}"])
 
@@ -136,9 +136,9 @@ def predict_and_orcarun_descript(chrom: str,
                 f"{l_resol}", 
                 f"{pred_path}/ref_orcarun", 
                 f"wt", 
-                f"{ref_fasta.split('/')[-1]}", 
+                f"{ref_fasta}", 
                 f"MatrixView", 
-                f"{ref_fasta.split('/')[-2]}", 
+                f"{ref_fasta}", 
                 f"OrcaMatrix",
                 f"{None}"]
 

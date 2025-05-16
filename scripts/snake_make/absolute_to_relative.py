@@ -20,7 +20,7 @@ import pandas as pd
 
 
 
-def relative_bed(bed, 
+def relative_bed(bed: str, 
                  chrom: str, 
                  muttype: str = "shuffle", 
                  sequence: str = ".",
@@ -74,7 +74,7 @@ def relative_bed(bed,
     return new_bed
         
 
-def relative_tsv(tsv, 
+def relative_tsv(tsv: str, 
                  chrom: str = None, 
                  start: int = None, 
                  end: int = None) :
@@ -125,7 +125,7 @@ def relative_tsv(tsv,
     return df_sorted_wtd
        
 
-def ref_seq_and_relative_bed(bed, tsv, fasta, mut_path: str, region: list) :
+def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, region: list) :
     """
     Generates a reference sequence and a relative BED or TSV file based on the given genomic region.
     This function extracts a specific genomic region from a FASTA file, saves it as a new FASTA file, 
@@ -147,6 +147,7 @@ def ref_seq_and_relative_bed(bed, tsv, fasta, mut_path: str, region: list) :
         - The start and end positions in the `region` argument are 1-based.
         - If the output files already exist, they will be overwritten.
     """
+    name = fasta.split("/")[-2]
     output_path = f"{mut_path}/reference"
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -156,7 +157,7 @@ def ref_seq_and_relative_bed(bed, tsv, fasta, mut_path: str, region: list) :
     fasta_handle = FastaFile(fasta)
     ref = fasta_handle.fetch(chrom, start-1, end)
     seq_record = SeqRecord(Seq(ref).upper(), id=f"fake_chr({chrom})",
-                               description=f"Offset (1-based) : {start}")
+                               description=f"\t{(end-start)//1e6}Mb extracted from {name}\tOffset (1-based) : {start}")
     
     fasta_path = f"{output_path}/sequence.fa"
     if os.path.exists(fasta_path) :
@@ -185,12 +186,12 @@ def ref_seq_and_relative_bed(bed, tsv, fasta, mut_path: str, region: list) :
     log_path = f"{output_path}/resume.log"
     with open(log_path, "w") as flog :
         flog.write(f"The relevant genome was saved in : {fasta_path}\n"
+                   "The reference genome used to produce this relative sequence "
+                   f"was from : {fasta}"
                    "The relevant mutations (with relative positions) to apply "
                    f"were stored in : {new_bed_path}\n"
                    "The offset for the relative mutations and the absolute start "
                    f"position of the sequence (1_based) is : {start}")
-    print("finished")
-
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,

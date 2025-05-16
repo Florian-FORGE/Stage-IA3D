@@ -259,15 +259,9 @@ def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int
     
     fasta_handle = FastaFile(genome)
 
-    forbid_pos = {}
-    for mut in mutations :
-        for i in range(mut.start, mut.end) :
-            forbid_pos[i] = True
-
-
     mutators = {"Wtd_mut" : Mutator(fasta_handle, mutations)}
     for i in range(nb_random):
-        rdm_seed = 3+i
+        rdm_seed = (3+i)**3
         random_mutations = generate_random_mutations(mutations=mutations, genome=genome, rdm_seed=rdm_seed, muttype=mutationtype)
         mutators[f"Rdm_mut_{i}"] = Mutator(fasta_handle, random_mutations)
     

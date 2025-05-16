@@ -200,7 +200,7 @@ def main(chrom,
          cool_resol: int = 128000, 
          strict: bool = False, 
          padding_chr: str ="chr1", 
-         use_cuda: bool = True, 
+         use_cuda: bool = False, 
          use_memmapgenome = True,
          pred_path: str =None):
     """
@@ -216,7 +216,7 @@ def main(chrom,
         cool_resol (int, optional): The resolution of the cool file and used to ensure that the start positions are aligned (the start poition should be divisible by cool_resol). Defaults to 128_000.
         strict (bool,optional) : Whether the start position should be used directly or not. Defaults to False.
         padding_chr (str, optional) : If resol_model is "256Mb", padding is generally needed to fill the sequence to 256Mb. The padding sequence will be extracted from the padding_chr. Defaults to "chr1". 
-        use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to True.
+        use_cuda (bool, optional): Whether to use CUDA for GPU acceleration. Defaults to False.
         use_memmapgenome (bool,optional): Whether to use memmory-mapped genome. Defaults to True.
         pred_path (str, optional): Path to the directory where the predictions will be saved. Defaults to None. If None, the predictions will be saved in the current working directory.
 

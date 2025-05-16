@@ -151,7 +151,7 @@ def get_obs_over_exp(mat):
 
 
 def _get_insulation_score(m: Union[list, np.ndarray], 
-                              w: int = 5) -> list :
+                          w: int = 5) -> list :
         n = len(m)
         scores = []
 
@@ -165,7 +165,7 @@ def _get_insulation_score(m: Union[list, np.ndarray],
             if nv == 0 :
                 score = np.nan
             else :
-                score = s/nv
+                score = (s/nv)*(2*w + 1)
             scores.append(score)
         
         for i in range(n-2*w):
@@ -269,9 +269,12 @@ def validate_safe_cast(input_data):
 def phase_vectors(vect, phasing_track):
     """
     """
+    vect = np.asarray(vect).ravel()
+    phasing_track = np.asarray(phasing_track).ravel()
+
     mask = np.isfinite(vect)
     
-    corr = spearmanr(phasing_track[mask], vect[mask])[0]
+    corr = spearmanr(phasing_track[mask], vect[mask]).statistic
 
     vect = np.sign(corr) * vect
 
@@ -372,13 +375,14 @@ class Matrix():
 
 
     def __init__(self, region: list, resolution: str, genome: str, gtype: str = "wt", 
-                 list_mutations: List[list] = None):
+                 list_mutations: List[list] = None, refgenome: str = None):
         self.region = region
         self.resolution = resolution
         self.references = region + [resolution]
         self.genome = genome
         self.gtype = gtype
         self.l_mut = list_mutations
+        self.refgenome = refgenome
         self._obs_o_exp = None
         self._obs = None
         self._expect = None
@@ -500,7 +504,7 @@ class Matrix():
         """
         if genome_path is None :
             if not os.path.isabs(self.refgenome):
-                if not self.refgenome.split('/')[-1] == "sequence" :
+                if not self.refgenome.split('/')[-1] == "sequence.fa" :
                     genome_path = f"./{self.refgenome}/sequence.fa"
                 else :
                     genome_path = f"./{self.refgenome}"
@@ -707,7 +711,7 @@ class Matrix():
 
         ax = f.add_subplot(gs[i, j])
 
-        m = get_property(self, self.which_matrix())
+        m = get_property(self, self.which_matrix(mtype="heatmap"))
         ticks = [i for i in range(0, m.shape[0]+1, m.shape[0]//(len(f_p_val)-1))]
         
         ax.imshow(m, 
@@ -717,13 +721,15 @@ class Matrix():
                   vmin=vmin, 
                   vmax=vmax)
 
-        ax.set_title('%s    -   Chrom : %s, Start : %d, End : %d, '
-                     'Resolution : %s   -   %s' 
-                     % titles)
+        ax.set_title(f"{titles[0]}  -   Chrom : {titles[1]}, Start : {titles[2]}, "
+                     f"End : {titles[3]}, Resolution : {titles[4]}  -   {titles[5]}",
+                     fontsize=14 
+                     )
         
         
         ax.set_yticks(ticks=ticks, labels=f_p_val)
         ax.set_xticks(ticks=ticks, labels=f_p_val)
+        ax.tick_params(axis='both', labelsize=14)
         format_ticks(ax, x=False, y=False)
         
         return ax
@@ -737,7 +743,7 @@ class Matrix():
                         ):
         
         """
-        Method to produce the heatmap associated to the obs_o_exp.
+        Method to add information on the heatmap.
         
         Parameters
         ----------
@@ -750,6 +756,10 @@ class Matrix():
         - genome_path : str
             the path to the reference genome to use for getting the right 
             phasing_track to use for compartment representation.
+        - mutation : bool
+            whether to plot the mutation position of the matrix (if they are 
+            given to the Matrix builder). If True, then the mutations are  
+            highlighted. By default, compartment = False.
         
         Returns
         ----------
@@ -785,9 +795,14 @@ class Matrix():
                         ax.plot([i, i], [0, rows-1], color="gray", lw=1)
 
         if mutation :
-            mut_pos = None # I need to decide where this information will be stored to get it here
-            # I also need to determine which kind of surcharge would be best to apply
-                                                                               
+            mut_pos = list(set(num for start, stop in self.list_mutations for num in range(start, stop + 1)))
+            for bin_idx in mut_pos:
+                # Highlight the mutated bin as a vertical band
+                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, color='green', alpha=0.3, label="Mutation")
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, color='green', alpha=0.3)
+
+            
+
     def heatmap_plot(self,
                      gs: GridSpec,
                      f: figure.Figure,
@@ -932,12 +947,9 @@ class OrcaMatrix(Matrix):
                  gtype: str,
                  refgenome: str, 
                  list_mutations: list):
-        gtype = gtype
-        self.refgenome = refgenome
-        l_mut = list_mutations
         region, resolution, self.orcapred, self.normmat, genome \
                     = load_attributes_orca_matrix(orcapredfile, normmatfile)
-        super().__init__(region, resolution, genome, gtype, l_mut)
+        super().__init__(region, resolution, genome, gtype, list_mutations, refgenome)
         
     
     @property
@@ -1071,17 +1083,24 @@ class RealMatrix(Matrix):
                  genome: str,
                  refgenome: str, 
                  list_mutations: str):
-        super().__init__(region, resolution, genome, gtype, list_mutations)
+        super().__init__(region, resolution, genome, gtype, list_mutations, refgenome)
         self.coolmat = load_coolmat(coolpath, region, resolution, balanced)
         self.coolpath = coolpath
+        self._log_obs = None
         self._log_obs_o_exp = None
         self.genome = genome
-        self.refgenome = refgenome
 
     @property
     def obs(self):
         self._obs = self.coolmat
         return self.coolmat
+
+    @property
+    def log_obs(self): 
+        if self._log_obs is None:
+            self._log_obs = np.log(self.obs)
+        return self._log_obs
+
 
     def get_expect(self) -> np.ndarray:
         """
@@ -1393,7 +1412,7 @@ def join_triangular_matrices(mat1: np.ndarray, mat2: np.ndarray):
             new_mat[i, i : ] = mat1[i, i : ]
             new_mat[i+1 : , i] = mat2[i+1 : , i]
 
-    np.fill_diagonal(new_mat, 1)
+    np.fill_diagonal(new_mat, np.mean(new_mat))
 
     return new_mat
 
@@ -1411,9 +1430,10 @@ def plot_superposed_scores(score1: list, score2: list, ax: axes, score_type: str
     # color by default : config_data["COLOR_CHART"][score_type]
     ax.plot(score1, color="blue")
     ax.plot(score2, color="green")
-    ax.set_ylabel("%s" % score_type)
+    ax.set_ylabel("%s" % score_type, fontsize=20)
     ax.set_xticks(ticks=ticks, labels=formatted_pos_vals)
-    ax.set_title(f"Superposed_{score_type}")
+    ax.tick_params(axis='both', labelsize=20)
+    ax.set_title(f"Superposed_{score_type}", fontsize=20)
 
 
 
@@ -1584,10 +1604,11 @@ class CompareMatrices():
                 for resol, mat in obj.items() :
                     mat_val = mat.flatten()
                     ref_val = ref[resol].flatten()
-                    slope, intercept, _, _, _ = linregress(mat_val, ref_val)
-                    regression_line = slope * ref_val + intercept
+                    # A strange idea to check the deviation of the regression line
+                    # slope, intercept, _, _, _ = linregress(mat_val, ref_val)
+                    # regression_line = slope * ref_val + intercept
 
-                    v_d_dict[run][resol] = regression_line - ref_val
+                    v_d_dict[run][resol] = mat_val - ref_val
                     
             ref = {resol : mat.flatten() for resol, mat in ref.items()}
             
@@ -1617,10 +1638,11 @@ class CompareMatrices():
             v_d_dict[run] = {}
             for resol, score in obj.items() :
                 ref_val = np.array(ref[resol])
-                slope, intercept, _, _, _ = linregress(score, ref_val)
-                regression_line = slope * ref_val + intercept
+                # A strange idea to check the deviation of the regression line
+                # slope, intercept, _, _, _ = linregress(score, ref_val)
+                # regression_line = slope * ref_val + intercept
 
-                v_d_dict[run][resol] = regression_line - ref_val
+                v_d_dict[run][resol] = score - ref_val
                 
         return [v_d_dict, ref]
 
@@ -2318,39 +2340,62 @@ class CompareMatrices():
             else :
                 split = False
             
-            violinplot(data=data, x="name", y="std_values", hue=hue, ax=ax, split=split, 
+            violinplot(data=data, x="name", y="values", hue=hue, ax=ax, split=split, 
                         inner="quarter", gap=.01, palette=palette, legend="auto")
-            ax.set_title(f"Violinplot_mat_values_{resol}")
+            ax.tick_params(axis='both', labelsize=20)
+            legend = ax.get_legend()
+            if legend is not None:
+                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
+                for text in legend.get_texts():
+                    text.set_fontsize(20)
+            ax.set_title(f"Violinplot_mat_values_{resol}", fontsize=20)
 
         elif all([d_type == "score" for d_type in data["data_type"]]) :
-            score_type = kwargs["score_type"] if "score_type" in kwargs.keys() else "insulation_count"
+            score_type = kwargs.get("score_type", "insulation_count")
 
             if not mut_dist :
                 palette = color_palette(palette=config_data["DISPERSION_COLOR"][score_type], n_colors=len(names))
 
-            swarmplot(data=data, x="name", y="std_values", hue=hue, ax=ax, 
+            swarmplot(data=data, x="name", y="values", hue=hue, ax=ax, 
                         palette=palette, legend="auto")
-                
-            ax.set_title(f"Jitterplot_{score_type}_{resol}")
+            
+            ax.tick_params(axis='both', labelsize=20)
+            legend = ax.get_legend()
+            if legend is not None:
+                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
+                for text in legend.get_texts():
+                    text.set_fontsize(20)
+            ax.set_title(f"Jitterplot_{score_type}_{resol}", fontsize=20)
 
 
     def dispersion_plot(self, 
                         data_type: str = "matrix", 
-                        merged: str = None, 
+                        merged_by: str = None, 
                         mut_dist: bool = False, 
-                        outputfile: str = None, 
+                        l_run: List[str] = None, 
+                        l_resol: List[str] = None, 
+                        outputfile: str = None,
+                        show: bool = False,  
                         **kwargs) :
         """
         """
+        if l_run is None :
+            l_run = [name for name in self.comp_dict.keys()]
+        if l_resol is None :
+            l_resol = [resol for resol in self.ref.di.keys()]
+
         df = self.extract_data(data_type=data_type, standard_dev=True, kwargs=kwargs)
-        df["values"] = abs(df["values"])
+        df = df[(df["name"].isin(l_run)) & (df["resolution"].isin(l_resol))]
+        
+        if data_type == "score" :
+            df["values"] = df["values"]**2
 
-        if merged is not None :
+        if merged_by is not None :
             df["run_name"] = df["name"]
-            df["name"] = df["name"].apply(lambda name: f"merged_{merged}" 
-                                                if merged.lower() in name.lower() 
+            df["name"] = df["name"].apply(lambda name: f"merged_{merged_by}" 
+                                                if merged_by.lower() in name.lower() 
                                                 else name)
-
+            
         resolutions = set()
         for resol in df["resolution"]:
             resolutions.add(resol)
@@ -2362,21 +2407,22 @@ class CompareMatrices():
         names = list(names)
 
         n = len(names)
+        fig_dim = (20*n, 30)
         
         gs = GridSpec(nrows=len(resolutions), ncols=1)
-        f = plt.figure(clear=True, figsize=(20*n, 100))
+        f = plt.figure(clear=True, figsize=fig_dim)
 
         # Trying to better visualize differences by dividing the values by the reference
-        df["std_values"] = abs(df["values"] / df["reference"])
+        # df["std_values"] = abs(df["values"] / df["reference"])
 
         for i, resol in enumerate(resolutions) :
             data = df[df["resolution"] == resol]
             self._dispersion_plot(gs=gs, f=f, data=data, resol=resol, names=names, 
-                                  i=i, mut_dist=mut_dist, kwargs=kwargs)
+                                  i=i, mut_dist=mut_dist, **kwargs)
         
         if outputfile: 
             plt.savefig(outputfile)
-        else:
+        elif show :
             plt.show()
         
         return df
@@ -2385,10 +2431,14 @@ class CompareMatrices():
     def plot_2_matices_comp(self, 
                             _2_run: List[str], 
                             resol: str, 
-                            genome_path: str, 
+                            comp_type: str, 
+                            genome_path: str = None, 
                             l_score_types: List[str] = ["insulation_count", 
                                                         "PC1", 
-                                                        "insulation_correl"]
+                                                        "insulation_correl"], 
+                            mutation: bool = False, 
+                            outputfile: str = None, 
+                            show: bool = False
                             ) :
         """
         """
@@ -2401,20 +2451,26 @@ class CompareMatrices():
         mat2 = matrices[_2_run[1]][0]
 
         nb_scores = len(l_score_types)
-        ratios = [4] + [0.25 for i in range(nb_scores)]
+        ratios = [4] + [0.75/nb_scores for i in range(nb_scores)]
         gs = GridSpec(nrows=1 + nb_scores, ncols=1, height_ratios=ratios)
-        f = plt.figure(clear=True, figsize=(20, 22))
+        f = plt.figure(clear=True, figsize=(30, 33))
 
         # Heatmap
         vmin, vmax = mat1.get_extremum_heatmap()
 
-        f_p_val, titles, cmap = mat1.formatting("Comparison")
+        f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
 
         ax = f.add_subplot(gs[0, 0])
 
-        mat_1 = get_property(mat1, mat1.which_matrix(mtype="count"))
-        mat_2 = get_property(mat2, mat2.which_matrix(mtype="count"))
-        m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
+        mat_1 = get_property(mat1, mat1.which_matrix(mtype="heatmap"))
+        mat_2 = get_property(mat2, mat2.which_matrix(mtype="heatmap"))
+        
+        if comp_type == "triangular" :
+            m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
+        elif comp_type == "substract" :
+            m = mat_2 - mat_1
+        else : 
+            raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
         
         ax.imshow(m, 
                   cmap=cmap, 
@@ -2422,25 +2478,53 @@ class CompareMatrices():
                   aspect='auto', 
                   vmin=vmin, 
                   vmax=vmax)
+        
+        if mutation :
+            mut_pos = list(set(num for start, stop in mat2.list_mutations for num in range(start, stop + 1)))
+            mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+            for bin_idx in mut_pos :
+                # Highlight the mutated bins
+                h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.005, color='green', alpha=.5, label="Mutation")
+                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.995, color='green', alpha=.5)
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color='green', alpha=.5)
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color='green', alpha=.5)
 
-        ax.set_title('%s    -   Chrom : %s, Start : %d, End : %d, '
-                     'Resolution : %s   -   %s' 
-                     % titles)
+        ax.set_title(f"{titles[0]}  -   Chrom : {titles[1]}, Start : {titles[2]}, "
+                     f"End : {titles[3]}, Resolution : {titles[4]}  -   {titles[5]}", 
+                     fontsize=20
+                     )
         
         ticks = [i for i in range(0, mat_1.shape[0]+1, mat_1.shape[0]//(len(f_p_val)-1))]
 
         ax.set_yticks(ticks=ticks, labels=f_p_val)
         ax.set_xticks(ticks=ticks, labels=f_p_val)
+        ax.tick_params(axis='both', labelsize=20)
         format_ticks(ax, x=False, y=False)
+        if mutation :
+            legend = ax.legend(handles=[h])
+            if legend is not None:
+                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
+                for text in legend.get_texts():
+                    text.set_fontsize(20)
+        ax.text(.992, .96, f"{mat1.genome}",
+                transform=ax.transAxes, fontsize=20,
+                verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle="round", facecolor="white"))
+        ax.text(.008, .04, f"{mat2.genome}",
+                transform=ax.transAxes, fontsize=20,
+                verticalalignment='bottom', horizontalalignment='left',
+                bbox=dict(boxstyle="round", facecolor="white"))
                             
         # Scores
         for i, score_type in enumerate(l_score_types) :
             if score_type == "PC1":
                 score1 = mat1.get_PC1(genome_path=genome_path)
-                score2 = mat1.get_PC1(genome_path=genome_path)
+                score2 = mat2.get_PC1(genome_path=genome_path)
             else :
                 score1 = get_property(mat1, score_type)
                 score2 = get_property(mat2, score_type)
+
+            score2 = phase_vectors(score2, score1)
             ax = f.add_subplot(gs[i+1, 0])
             
             plot_superposed_scores(score1=score1, 
@@ -2449,8 +2533,12 @@ class CompareMatrices():
                                    score_type=score_type, 
                                    formatted_pos_vals=f_p_val)
             
-        
-        plt.show()
+        if outputfile : 
+            plt.savefig(outputfile)
+        elif show :
+            plt.show()
+
+
 
 
 def _build_MatrixView_(row: NamedTuple, 
@@ -2479,7 +2567,7 @@ def _build_MatrixView_(row: NamedTuple,
     list_mutations = None
     trace_path = row.trace_path if (hasattr(row, "trace_path") and row.trace_path != "_") else None
                 
-    if trace_path is not None :
+    if isinstance(trace_path, str) :
         if not os.path.isabs(trace_path):
             trace_path = os.path.abspath(trace_path)
 
@@ -2560,95 +2648,15 @@ def build_CompareMatrices(filepathref: str, filepathcomp: str) :
     df = pd.read_csv(filepathcomp, header=0, sep='\t')
     comp = {}
     for row in df.itertuples(index=False):
-        if row.obj_type == "RealMatrix":
-            obj = RealMatrix(region=row.region, 
-                             resolution=row.resol, 
-                             gtype=row.gtype, 
-                             coolpath=row.coolpath,
-                             genome=row.genome)
+        obj = _build_MatrixView_(row=row)
         
-        elif row.obj_type == "OrcaMatrix":
-            obj = OrcaMatrix(orcapredfile=row.orcapredpath, 
-                             normmatfile=row.normmatpath, 
-                             gtype=row.gtype)
-        
-        elif row.obj_type == "MatrixView":
-            obj = _build_MatrixView_(row=row)
-        
-        else : 
-            raise TypeError(f"{row.obj_type} is not a supported object type. "
-                            "Only 'RealMatrix', 'OrcaMatrix' and 'MatrixView "
-                            "are supported...Exiting.")
-    
         comp[row.name] = obj
-
 
     ref_df = pd.read_csv(filepathref, header=0, sep='\t')
 
     ref_row = next(ref_df.itertuples(index=False))
 
-    if ref_row.obj_type == "RealMatrix":
-        if any(isinstance(value, MatrixView) for value in comp.values()):
-            raise TypeError("MatrixView objects cannot be used with Matrix"
-                            "objects. This comparison is not supported.")
-
-        balanced=ref_row.balanced
-        if isinstance(balanced, str):
-            if balanced.lower() == "true" :
-                balanced = True
-        
-        refer = next(iter(comp.values())).references
-        if any(mat.references != refer for mat in comp.values()) :
-            logging.warning("There are at least two Matrix objects with different " \
-                            "references in the compared dictionary. Using the " \
-                            "references of the first Matrix object created in this " \
-                            "dictionary...Proceeding.")
-        resolution_1 = refer[3]
-        region_1 = refer[:2]
-                
-        ref = RealMatrix(region = region_1,
-                         resolution = resolution_1,
-                         gtype = ref_row.gtype,
-                         coolpath = ref_row.coolpath,
-                         balanced=balanced,
-                         genome=ref_row.genome,
-                         refgenome=ref_row.refgenome)
-    
-    elif ref_row.obj_type == "OrcaMatrix":
-        if any(isinstance(value, MatrixView) for value in comp.values()):
-            raise TypeError("MatrixView objects cannot be used with Matrix"
-                            "objects. This comparison is not supported.")
-
-        path = ref_row.path
-        resol = ref_row.resol
-
-        ref = OrcaMatrix(orcapredfile=f"{path}/pred_predictions_{resol}.txt", 
-                         normmatfile=f"{path}/pred_normmats_{resol}.txt", 
-                         gtype=ref_row.gtype,
-                         refgenome=ref_row.refgenome)
-    
-    elif ref_row.obj_type == "MatrixView":
-        if any(isinstance(value, Matrix) for value in comp.values()):
-            raise TypeError("MatrixView objects cannot be used with Matrix"
-                            "objects. This comparison is not supported.")
-        
-        refer = next(iter(comp.values()))
-        if any(mat.references != refer.references for mat in comp.values()) :
-            logging.warning("There are at least two Matrix objects with different " \
-                            "references in the compared dictionary. Using the " \
-                            "references of the first Matrix object created in this " \
-                            "dictionary...Proceeding.")
-        list_resolutions_1 = refer.region.keys()
-        regions_1 = refer.region
-
-        ref = _build_MatrixView_(row=ref_row,
-                                 regions=regions_1,
-                                 list_resol=list_resolutions_1)
-
-    else : 
-        raise TypeError(f"{row.obj_type} is not a supported object type. "
-                        "Only 'RealMatrix', 'OrcaMatrix' and 'MatrixView "
-                        "are supported...Exiting.")
+    ref = _build_MatrixView_(row=ref_row)
     
     return CompareMatrices(ref, comp)
 

@@ -11,14 +11,17 @@ COLOR_CHART:
 # TF Dificile à comprendre....
 WHICH_MATRIX:
   Matrix:
-    count: _obs_o_exp
+    heatmap: _obs_o_exp
+    count: _obs
     correl: _obs
   OrcaMatrix:
-    count: obs_o_exp
+    heatmap: obs_o_exp
+    count: obs
     correl: obs
   RealMatrix:
-    count: log_obs_o_exp
-    correl: obs
+    heatmap: log_obs_o_exp
+    count: log_obs
+    correl: log_obs
 
 REF_GENOME: ../notebooks/resources/genome/Homo_sapiens.GRCh38.dna.primary_assembly/sequence.fa
 
