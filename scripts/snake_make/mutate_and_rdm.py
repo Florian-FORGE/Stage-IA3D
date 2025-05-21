@@ -100,9 +100,11 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
     
+    muttype = "shuffle" if args.muttype is None else args.muttype
     mutate_and_rdm_mutations(relative_bed=args.relative_bed, 
                              relative_tsv=args.relative_tsv, 
                              relative_fasta=args.relative_fasta, 
-                             mut_path=args.mut_path,
+                             mut_path=args.mut_path, 
+                             muttype=muttype, 
                              nb_random=args.nb_random)
 

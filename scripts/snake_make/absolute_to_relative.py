@@ -187,7 +187,7 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
     with open(log_path, "w") as flog :
         flog.write(f"The relevant genome was saved in : {fasta_path}\n"
                    "The reference genome used to produce this relative sequence "
-                   f"was from : {fasta}"
+                   f"was from : {fasta}\n"
                    "The relevant mutations (with relative positions) to apply "
                    f"were stored in : {new_bed_path}\n"
                    "The offset for the relative mutations and the absolute start "

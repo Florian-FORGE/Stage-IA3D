@@ -60,14 +60,15 @@ def analysis_plot(builder_path: str, analysis_path:str, l_score_types: list, l_c
                 mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, 
                                                 mut_dist=True, score_type = score)
                 pdf.savefig()
-                log_info += f"mat_comparisons.dispersion_plot(data_type='{score}', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = {score})\n"
+                log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = {score})\n"
                                    
             for comp_type in l_comp_types :
                 mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type=comp_type, l_score_types=l_score_types, mutation=True)
                 pdf.savefig()
-                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type={comp_type}, l_score_types={l_score_types}, mutation=True)\n\n"
-                        
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type={comp_type}, l_score_types={l_score_types}, mutation=True)\n"
+            
             pdf.close()
+            log_info += f"\n"
     
     log_path = f"{analysis_path}/plots.log"
     with open(log_path, "w") as fout:
