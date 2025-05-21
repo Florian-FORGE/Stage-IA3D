@@ -1,5 +1,5 @@
 import cooler
-from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected, is_symmetric
+from cooltools.lib.numutils import adaptive_coarsegrain, observed_over_expected
 from cooltools.api.eigdecomp import cis_eig
 import bioframe
 
@@ -10,7 +10,7 @@ import numpy as np
 
 import pandas as pd
 import os
-from typing import Dict, Union, Callable, NamedTuple, List, Any
+from typing import Dict, Union, NamedTuple, List, Any
 from collections import ChainMap
 
 from matplotlib import figure, axes
@@ -21,8 +21,7 @@ from seaborn import violinplot, swarmplot, color_palette
 from matplotlib.ticker import EngFormatter
 bp_formatter = EngFormatter(unit = "b", places = 1, sep = " ")
 
-from Cmap_orca import hnh_cmap_ext5
-import inspect
+from Cmap_orca import hnh_cmap_ext5, blue_cmap
 
 import logging
 logging.basicConfig(
@@ -288,7 +287,7 @@ def associate_score_to_standard_dev(score_type: str) :
         return "value_deviation_insul_correl"
     
     elif score_type == "PC1" :
-        return "strandard_dev_PC1"
+        return "value_deviation_PC1"
     
     else :
         raise ValueError(f"This score_type : {score_type} is not supported...Exiting")
@@ -796,10 +795,19 @@ class Matrix():
 
         if mutation :
             mut_pos = list(set(num for start, stop in self.list_mutations for num in range(start, stop + 1)))
-            for bin_idx in mut_pos:
+            mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+            for bin_idx in mut_pos :
                 # Highlight the mutated bin as a vertical band
-                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, color='green', alpha=0.3, label="Mutation")
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, color='green', alpha=0.3)
+                h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.005, color='green', alpha=.5, label="Mutation")
+                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.995, color='green', alpha=.5)
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color='green', alpha=.5)
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color='green', alpha=.5)
+            
+            legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
+            if legend is not None:
+                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
+                for text in legend.get_texts():
+                    text.set_fontsize(20)
 
             
 
@@ -1417,7 +1425,78 @@ def join_triangular_matrices(mat1: np.ndarray, mat2: np.ndarray):
     return new_mat
 
 
-def plot_superposed_scores(score1: list, score2: list, ax: axes, score_type: str, formatted_pos_vals: List[str]) :
+def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure):
+    """
+    """
+    f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
+
+    ax = f.add_subplot(gs[0, 0])
+
+    mat_1 = get_property(mat1, mat1.which_matrix(mtype="heatmap"))
+    mat_2 = get_property(mat2, mat2.which_matrix(mtype="heatmap"))
+    
+    if comp_type == "triangular" :
+        m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
+        vmin, vmax = mat1.get_extremum_heatmap()
+    elif comp_type == "substract" :
+        m = mat_2 - mat_1
+        cmap = blue_cmap
+        vmin, vmax = config_data["EXTREMUM_HEATMAP"]["Substract_mats"]
+    else : 
+        raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
+    
+    img = ax.imshow(m, 
+                    cmap=cmap, 
+                    interpolation='nearest', 
+                    aspect='auto', 
+                    vmin=vmin, 
+                    vmax=vmax)
+    
+    if mutation :
+        color, alpha = ('orange', .75) if comp_type == "substract" else ('green', .5) 
+        mut_pos = list(set(num for start, stop in mat2.list_mutations for num in range(start, stop + 1)))
+        mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+        for bin_idx in mut_pos :
+            # Highlight the mutated bins
+            h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.005, color=color, alpha=alpha, label="Mutation")
+            ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.995, color=color, alpha=alpha)
+            ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color=color, alpha=alpha)
+            ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color=color, alpha=alpha)
+
+    ax.set_title(f"{titles[0]}  -   Chrom : {titles[1]}, Start : {titles[2]}, "
+                    f"End : {titles[3]}, Resolution : {titles[4]}\n", 
+                    fontsize=20
+                    )
+    
+    ticks = [i for i in range(0, mat_1.shape[0]+1, mat_1.shape[0]//(len(f_p_val)-1))]
+
+    ax.set_yticks(ticks=ticks, labels=f_p_val)
+    ax.set_xticks(ticks=ticks, labels=f_p_val)
+    ax.tick_params(axis='both', labelsize=20)
+    format_ticks(ax, x=False, y=False)
+    if mutation :
+        legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
+        if legend is not None:
+            legend.set_title(legend.get_title().get_text(), prop={'size': 20})
+            for text in legend.get_texts():
+                text.set_fontsize(20)
+    if comp_type == "triangular" :
+        ax.text(.98, .93, f"{mat1.genome}",
+                transform=ax.transAxes, fontsize=20,
+                verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle="round", facecolor="white"))
+        ax.text(.02, .07, f"{mat2.genome}",
+                transform=ax.transAxes, fontsize=20,
+                verticalalignment='bottom', horizontalalignment='left',
+                bbox=dict(boxstyle="round", facecolor="white"))
+
+
+    ax_cb = f.add_subplot(gs[0, 1])
+    f.colorbar(img, cax=ax_cb)
+    ax_cb.tick_params(labelsize=16)
+
+
+def plot_superposed_scores(score1: list, score2: list, ax: axes, score_type: str, formatted_pos_vals: List[str], names: List[str], show_legend: bool = True) :
     """
     """
     if len(score1) != len(score2) :
@@ -1428,12 +1507,19 @@ def plot_superposed_scores(score1: list, score2: list, ax: axes, score_type: str
 
     ax.set_xlim(0, 250)
     # color by default : config_data["COLOR_CHART"][score_type]
-    ax.plot(score1, color="blue")
-    ax.plot(score2, color="green")
+    line1 = ax.plot(score1, color="blue", label=names[0])
+    line2 = ax.plot(score2, color="green", label=names[1])
     ax.set_ylabel("%s" % score_type, fontsize=20)
     ax.set_xticks(ticks=ticks, labels=formatted_pos_vals)
     ax.tick_params(axis='both', labelsize=20)
     ax.set_title(f"Superposed_{score_type}", fontsize=20)
+    if show_legend :
+        ax.legend()
+    else :
+        legend_data = [
+            {"label": names[0], "color": line1[0].get_color()},
+            {"label": names[1], "color": line2[0].get_color()}]
+        return legend_data
 
 
 
@@ -2357,7 +2443,7 @@ class CompareMatrices():
                 palette = color_palette(palette=config_data["DISPERSION_COLOR"][score_type], n_colors=len(names))
 
             swarmplot(data=data, x="name", y="values", hue=hue, ax=ax, 
-                        palette=palette, legend="auto")
+                        palette=palette, legend="auto", size=15)
             
             ax.tick_params(axis='both', labelsize=20)
             legend = ax.get_legend()
@@ -2375,7 +2461,11 @@ class CompareMatrices():
                         l_run: List[str] = None, 
                         l_resol: List[str] = None, 
                         outputfile: str = None,
-                        show: bool = False,  
+                        show: bool = False, 
+                        gs: GridSpec = None, 
+                        f: figure.Figure = None, 
+                        i: int = 0, 
+                        j: int = 0,  
                         **kwargs) :
         """
         """
@@ -2384,7 +2474,7 @@ class CompareMatrices():
         if l_resol is None :
             l_resol = [resol for resol in self.ref.di.keys()]
 
-        df = self.extract_data(data_type=data_type, standard_dev=True, kwargs=kwargs)
+        df = self.extract_data(data_type=data_type, standard_dev=True, **kwargs)
         df = df[(df["name"].isin(l_run)) & (df["resolution"].isin(l_resol))]
         
         if data_type == "score" :
@@ -2406,19 +2496,19 @@ class CompareMatrices():
             names.add(name)
         names = list(names)
 
-        n = len(names)
-        fig_dim = (20*n, 30)
+        # fig_dim = (40, 16)
+        fig_dim = (20, 22)
         
-        gs = GridSpec(nrows=len(resolutions), ncols=1)
-        f = plt.figure(clear=True, figsize=fig_dim)
+        gs = GridSpec(nrows=len(resolutions), ncols=1) if gs is None else gs
+        f = plt.figure(clear=True, figsize=fig_dim) if f is None else gs
 
         # Trying to better visualize differences by dividing the values by the reference
         # df["std_values"] = abs(df["values"] / df["reference"])
 
-        for i, resol in enumerate(resolutions) :
+        for k, resol in enumerate(resolutions) :
             data = df[df["resolution"] == resol]
             self._dispersion_plot(gs=gs, f=f, data=data, resol=resol, names=names, 
-                                  i=i, mut_dist=mut_dist, **kwargs)
+                                  i=i+k, j=j, mut_dist=mut_dist, **kwargs)
         
         if outputfile: 
             plt.savefig(outputfile)
@@ -2438,8 +2528,11 @@ class CompareMatrices():
                                                         "insulation_correl"], 
                             mutation: bool = False, 
                             outputfile: str = None, 
-                            show: bool = False
-                            ) :
+                            show: bool = False, 
+                            gs: GridSpec = None, 
+                            f: figure.Figure = None, 
+                            i: int = None, 
+                            j: int = None) :
         """
         """
         if len(_2_run) != 2 :
@@ -2450,89 +2543,50 @@ class CompareMatrices():
         mat1 = matrices[_2_run[0]][0]
         mat2 = matrices[_2_run[1]][0]
 
-        nb_scores = len(l_score_types)
-        ratios = [4] + [0.75/nb_scores for i in range(nb_scores)]
-        gs = GridSpec(nrows=1 + nb_scores, ncols=1, height_ratios=ratios)
-        f = plt.figure(clear=True, figsize=(30, 33))
+        if gs is None :
+            nb_scores = len(l_score_types)
+            ratios = [1] + [0.75/nb_scores for i in range(nb_scores)]
+            gs = GridSpec(nrows=1 + nb_scores, ncols=2, height_ratios=ratios, width_ratios=(98, 2))
+        f = plt.figure(clear=True, figsize=(20, 32)) if f is None else f
 
         # Heatmap
-        vmin, vmax = mat1.get_extremum_heatmap()
+        heatmap_matrices_comp(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, gs=gs, f=f)
 
-        f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
-
-        ax = f.add_subplot(gs[0, 0])
-
-        mat_1 = get_property(mat1, mat1.which_matrix(mtype="heatmap"))
-        mat_2 = get_property(mat2, mat2.which_matrix(mtype="heatmap"))
-        
-        if comp_type == "triangular" :
-            m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
-        elif comp_type == "substract" :
-            m = mat_2 - mat_1
-        else : 
-            raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
-        
-        ax.imshow(m, 
-                  cmap=cmap, 
-                  interpolation='nearest', 
-                  aspect='auto', 
-                  vmin=vmin, 
-                  vmax=vmax)
-        
-        if mutation :
-            mut_pos = list(set(num for start, stop in mat2.list_mutations for num in range(start, stop + 1)))
-            mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
-            for bin_idx in mut_pos :
-                # Highlight the mutated bins
-                h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.005, color='green', alpha=.5, label="Mutation")
-                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.995, color='green', alpha=.5)
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color='green', alpha=.5)
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color='green', alpha=.5)
-
-        ax.set_title(f"{titles[0]}  -   Chrom : {titles[1]}, Start : {titles[2]}, "
-                     f"End : {titles[3]}, Resolution : {titles[4]}  -   {titles[5]}", 
-                     fontsize=20
-                     )
-        
-        ticks = [i for i in range(0, mat_1.shape[0]+1, mat_1.shape[0]//(len(f_p_val)-1))]
-
-        ax.set_yticks(ticks=ticks, labels=f_p_val)
-        ax.set_xticks(ticks=ticks, labels=f_p_val)
-        ax.tick_params(axis='both', labelsize=20)
-        format_ticks(ax, x=False, y=False)
-        if mutation :
-            legend = ax.legend(handles=[h])
-            if legend is not None:
-                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
-                for text in legend.get_texts():
-                    text.set_fontsize(20)
-        ax.text(.992, .96, f"{mat1.genome}",
-                transform=ax.transAxes, fontsize=20,
-                verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle="round", facecolor="white"))
-        ax.text(.008, .04, f"{mat2.genome}",
-                transform=ax.transAxes, fontsize=20,
-                verticalalignment='bottom', horizontalalignment='left',
-                bbox=dict(boxstyle="round", facecolor="white"))
-                            
         # Scores
+        f_p_val = mat1.formatting()[0]
+        legend_data = None
         for i, score_type in enumerate(l_score_types) :
-            if score_type == "PC1":
-                score1 = mat1.get_PC1(genome_path=genome_path)
-                score2 = mat2.get_PC1(genome_path=genome_path)
-            else :
-                score1 = get_property(mat1, score_type)
-                score2 = get_property(mat2, score_type)
+            score1 = get_property(mat1, score_type)
+            score2 = get_property(mat2, score_type)
 
             score2 = phase_vectors(score2, score1)
             ax = f.add_subplot(gs[i+1, 0])
             
-            plot_superposed_scores(score1=score1, 
-                                   score2=score2, 
-                                   ax=ax, 
-                                   score_type=score_type, 
-                                   formatted_pos_vals=f_p_val)
-            
+            if legend_data is None:
+                legend_data = plot_superposed_scores(score1=score1, 
+                                                     score2=score2, 
+                                                     ax=ax, 
+                                                     score_type=score_type, 
+                                                     formatted_pos_vals=f_p_val,
+                                                     names=_2_run, 
+                                                     show_legend=False)
+            else:
+                plot_superposed_scores(score1=score1, 
+                                      score2=score2, 
+                                      ax=ax, 
+                                      score_type=score_type, 
+                                      formatted_pos_vals=f_p_val,
+                                      names=_2_run, 
+                                      show_legend=False)
+        
+        # Custom legend spanning the right side of all score plots
+        ax_lgd = f.add_subplot(gs[1:1+len(l_score_types), 1])
+        ax_lgd.axis('off')
+        if legend_data:
+            from matplotlib.lines import Line2D
+            handles = [Line2D([0], [0], color=entry["color"], lw=4, label=entry["label"]) for entry in legend_data]
+            ax_lgd.legend(handles=handles, loc='center', fontsize=24, frameon=False)
+        
         if outputfile : 
             plt.savefig(outputfile)
         elif show :

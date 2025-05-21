@@ -236,7 +236,7 @@ def generate_random_mutations(mutations: List[Mutation],
             chromlen = chromsize if chromsize is not None else len(fasta_handle[chr])
             fs.write(f"{chr}\t{chromlen}\n")
 
-    rdm_bed = bed.shuffle(g=f"{dir}/chrom_size.csv", seed=1/rdm_seed)
+    rdm_bed = bed.shuffle(g=f"{dir}/chrom_size.csv", seed=rdm_seed, noOverlapping = True)
 
     intervals = []
     for line in rdm_bed:
