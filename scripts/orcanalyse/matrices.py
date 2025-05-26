@@ -2537,7 +2537,8 @@ class CompareMatrices():
                             gs: GridSpec = None, 
                             f: figure.Figure = None, 
                             i: int = 0, 
-                            j: int = 0) :
+                            j: int = 0, 
+                            show_legend: bool = False) :
         """
         """
         if len(_2_run) != 2 :
@@ -2585,7 +2586,7 @@ class CompareMatrices():
                                       show_legend=False)
         
         # Custom legend spanning the right side of all score plots
-        if legend_data:
+        if legend_data and show_legend:
             ax_lgd = f.add_subplot(gs[i+1:, j+1])
             ax_lgd.axis('off')
         
