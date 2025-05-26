@@ -53,6 +53,7 @@ class Mutation():
         self.strand = strand
         self.ref = None
         self.alt = None
+        self.bin_order = None
         self.op = operation
         if operation == "insertion":
             if not self._validinsertion(sequence):
@@ -201,6 +202,24 @@ class Mutator():
         mutation.alt = sequence
 
 
+    def bin_shuffle(self, mutation: Mutation, binsize: int = 128_000):
+        subseq = self.get_ref(mutation)
+        if (len(subseq) < binsize) or (len(subseq)%binsize != 0) :
+            raise ValueError(f"The range of the mutation ({len(subseq)}) and the "
+                             f"binsize ({binsize}) are not compatible")
+        
+        mutation.ref = subseq
+        
+        bins = [f"-{i}-" + subseq[i*binsize : (i+1)*binsize] for i in range((len(subseq)//binsize))]
+        interm = ''.join(random.sample(bins, len(bins)))
+        split_interm = interm.split("-")
+        bin_order = [split_interm[i] for i in range(len(split_interm)) if split_interm[i].isdigit()]
+        new_order_seq = [split_interm[i] for i in range(len(split_interm)) if not split_interm[i].isdigit()]
+        
+        mutation.alt = ''.join(new_order_seq)
+        mutation.bin_order = ':'.join(bin_order)
+
+
     def mutate(self):
         """
         Mutate the sequence for each interval according to the mutation type
@@ -216,6 +235,8 @@ class Mutator():
                 self.invert(mutation)
             elif mutation.op == "insertion":
                 self.insert(mutation)
+            elif mutation.op == "bin_shuffle":
+                self.bin_shuffle(mutation)
             else:
                 self.chromosome_mutations[mutation.chrom] -= 1
                 raise ValueError("%s is not a valid operation" % mutation.op)
@@ -299,7 +320,10 @@ class Mutator():
     def get_trace(self):
         data = []
         for mutation in self.mutations:
-            data.append(mutation.trace())
+            trace = mutation.trace()
+            if mutation.op == "bin_shuffle" :
+                trace["bin_order"] = mutation.bin_order
+            data.append(trace)
         return pd.DataFrame(data)
 
 
