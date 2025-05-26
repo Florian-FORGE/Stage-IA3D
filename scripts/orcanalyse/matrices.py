@@ -15,6 +15,7 @@ from collections import ChainMap
 
 from matplotlib import figure, axes
 from matplotlib.gridspec import GridSpec
+from matplotlib.lines import Line2D
 from matplotlib.backends.backend_pdf import PdfPages
 from seaborn import violinplot, swarmplot, color_palette
 
@@ -1425,12 +1426,12 @@ def join_triangular_matrices(mat1: np.ndarray, mat2: np.ndarray):
     return new_mat
 
 
-def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure):
+def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, i: int = 0, j: int = 0):
     """
     """
     f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
 
-    ax = f.add_subplot(gs[0, 0])
+    ax = f.add_subplot(gs[i, j])
 
     mat_1 = get_property(mat1, mat1.which_matrix(mtype="heatmap"))
     mat_2 = get_property(mat2, mat2.which_matrix(mtype="heatmap"))
@@ -1445,12 +1446,12 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
     else : 
         raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
     
-    img = ax.imshow(m, 
-                    cmap=cmap, 
-                    interpolation='nearest', 
-                    aspect='auto', 
-                    vmin=vmin, 
-                    vmax=vmax)
+    ax.imshow(m, 
+              cmap=cmap, 
+              interpolation='nearest', 
+              aspect='auto', 
+              vmin=vmin, 
+              vmax=vmax)
     
     if mutation :
         color, alpha = ('orange', .75) if comp_type == "substract" else ('green', .5) 
@@ -1463,16 +1464,16 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
             ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color=color, alpha=alpha)
             ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color=color, alpha=alpha)
 
-    ax.set_title(f"{titles[0]}  -   Chrom : {titles[1]}, Start : {titles[2]}, "
+    ax.set_title(f"{titles[0]}\nChrom : {titles[1]}, Start : {titles[2]}, "
                     f"End : {titles[3]}, Resolution : {titles[4]}\n", 
-                    fontsize=20
+                    fontsize=22
                     )
     
     ticks = [i for i in range(0, mat_1.shape[0]+1, mat_1.shape[0]//(len(f_p_val)-1))]
 
     ax.set_yticks(ticks=ticks, labels=f_p_val)
     ax.set_xticks(ticks=ticks, labels=f_p_val)
-    ax.tick_params(axis='both', labelsize=20)
+    ax.tick_params(axis='both', labelsize=22)
     format_ticks(ax, x=False, y=False)
     if mutation :
         legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
@@ -1482,18 +1483,14 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
                 text.set_fontsize(20)
     if comp_type == "triangular" :
         ax.text(.98, .93, f"{mat1.genome}",
-                transform=ax.transAxes, fontsize=20,
+                transform=ax.transAxes, fontsize=22,
                 verticalalignment='top', horizontalalignment='right',
                 bbox=dict(boxstyle="round", facecolor="white"))
         ax.text(.02, .07, f"{mat2.genome}",
-                transform=ax.transAxes, fontsize=20,
+                transform=ax.transAxes, fontsize=22,
                 verticalalignment='bottom', horizontalalignment='left',
                 bbox=dict(boxstyle="round", facecolor="white"))
 
-
-    ax_cb = f.add_subplot(gs[0, 1])
-    f.colorbar(img, cax=ax_cb)
-    ax_cb.tick_params(labelsize=16)
 
 
 def plot_superposed_scores(score1: list, score2: list, ax: axes, score_type: str, formatted_pos_vals: List[str], names: List[str], show_legend: bool = True) :
@@ -1509,10 +1506,10 @@ def plot_superposed_scores(score1: list, score2: list, ax: axes, score_type: str
     # color by default : config_data["COLOR_CHART"][score_type]
     line1 = ax.plot(score1, color="blue", label=names[0])
     line2 = ax.plot(score2, color="green", label=names[1])
-    ax.set_ylabel("%s" % score_type, fontsize=20)
+    ax.set_ylabel("%s" % score_type, fontsize=22)
     ax.set_xticks(ticks=ticks, labels=formatted_pos_vals)
-    ax.tick_params(axis='both', labelsize=20)
-    ax.set_title(f"Superposed_{score_type}", fontsize=20)
+    ax.tick_params(axis='both', labelsize=22)
+    ax.set_title(f"Superposed_{score_type}", fontsize=22)
     if show_legend :
         ax.legend()
     else :
@@ -2404,14 +2401,16 @@ class CompareMatrices():
                          data: pd.DataFrame,
                          resol: str,
                          names: list,
+                         ax: axes = None,
                          mut_dist: bool = False, 
                          i: int = 0, 
                          j: int =0, 
                          **kwargs):
         """
         """
-        ax = f.add_subplot(gs[i, j])
-
+        if ax is None :
+            ax = f.add_subplot(gs[i, j])
+        
         if mut_dist :
             hue = "mutation_distance"
             palette = color_palette(palette=config_data["DISPERSION_COLOR"]["default"], as_cmap=True)
@@ -2428,13 +2427,13 @@ class CompareMatrices():
             
             violinplot(data=data, x="name", y="values", hue=hue, ax=ax, split=split, 
                         inner="quarter", gap=.01, palette=palette, legend="auto")
-            ax.tick_params(axis='both', labelsize=20)
+            ax.tick_params(axis='both', labelsize=22)
             legend = ax.get_legend()
             if legend is not None:
                 legend.set_title(legend.get_title().get_text(), prop={'size': 20})
                 for text in legend.get_texts():
                     text.set_fontsize(20)
-            ax.set_title(f"Violinplot_mat_values_{resol}", fontsize=20)
+            ax.set_title(f"Violinplot_mat_values_{resol}", fontsize=22)
 
         elif all([d_type == "score" for d_type in data["data_type"]]) :
             score_type = kwargs.get("score_type", "insulation_count")
@@ -2445,13 +2444,19 @@ class CompareMatrices():
             swarmplot(data=data, x="name", y="values", hue=hue, ax=ax, 
                         palette=palette, legend="auto", size=15)
             
-            ax.tick_params(axis='both', labelsize=20)
+            ax.tick_params(axis='both', labelsize=22)
             legend = ax.get_legend()
             if legend is not None:
                 legend.set_title(legend.get_title().get_text(), prop={'size': 20})
                 for text in legend.get_texts():
                     text.set_fontsize(20)
-            ax.set_title(f"Jitterplot_{score_type}_{resol}", fontsize=20)
+            ax.set_title(f"Jitterplot_{score_type}_{resol}", fontsize=22)
+        
+        else :
+            raise ValueError("The data_type should be the same for the whole dataset...Exiting.")
+
+        ax.set_xlabel('')
+        ax.set_ylabel('')
 
 
     def dispersion_plot(self, 
@@ -2464,6 +2469,7 @@ class CompareMatrices():
                         show: bool = False, 
                         gs: GridSpec = None, 
                         f: figure.Figure = None, 
+                        ax: axes = None, 
                         i: int = 0, 
                         j: int = 0,  
                         **kwargs) :
@@ -2500,7 +2506,7 @@ class CompareMatrices():
         fig_dim = (20, 22)
         
         gs = GridSpec(nrows=len(resolutions), ncols=1) if gs is None else gs
-        f = plt.figure(clear=True, figsize=fig_dim) if f is None else gs
+        f = plt.figure(clear=True, figsize=fig_dim) if f is None else f
 
         # Trying to better visualize differences by dividing the values by the reference
         # df["std_values"] = abs(df["values"] / df["reference"])
@@ -2508,7 +2514,7 @@ class CompareMatrices():
         for k, resol in enumerate(resolutions) :
             data = df[df["resolution"] == resol]
             self._dispersion_plot(gs=gs, f=f, data=data, resol=resol, names=names, 
-                                  i=i+k, j=j, mut_dist=mut_dist, **kwargs)
+                                  ax=ax, i=i+k, j=j, mut_dist=mut_dist, **kwargs)
         
         if outputfile: 
             plt.savefig(outputfile)
@@ -2522,7 +2528,6 @@ class CompareMatrices():
                             _2_run: List[str], 
                             resol: str, 
                             comp_type: str, 
-                            genome_path: str = None, 
                             l_score_types: List[str] = ["insulation_count", 
                                                         "PC1", 
                                                         "insulation_correl"], 
@@ -2531,8 +2536,8 @@ class CompareMatrices():
                             show: bool = False, 
                             gs: GridSpec = None, 
                             f: figure.Figure = None, 
-                            i: int = None, 
-                            j: int = None) :
+                            i: int = 0, 
+                            j: int = 0) :
         """
         """
         if len(_2_run) != 2 :
@@ -2550,17 +2555,17 @@ class CompareMatrices():
         f = plt.figure(clear=True, figsize=(20, 32)) if f is None else f
 
         # Heatmap
-        heatmap_matrices_comp(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, gs=gs, f=f)
+        heatmap_matrices_comp(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, gs=gs, f=f, i=i, j=j)
 
         # Scores
         f_p_val = mat1.formatting()[0]
         legend_data = None
-        for i, score_type in enumerate(l_score_types) :
+        for k, score_type in enumerate(l_score_types) :
             score1 = get_property(mat1, score_type)
             score2 = get_property(mat2, score_type)
 
             score2 = phase_vectors(score2, score1)
-            ax = f.add_subplot(gs[i+1, 0])
+            ax = f.add_subplot(gs[i+1+k, j])
             
             if legend_data is None:
                 legend_data = plot_superposed_scores(score1=score1, 
@@ -2580,12 +2585,12 @@ class CompareMatrices():
                                       show_legend=False)
         
         # Custom legend spanning the right side of all score plots
-        ax_lgd = f.add_subplot(gs[1:1+len(l_score_types), 1])
-        ax_lgd.axis('off')
         if legend_data:
-            from matplotlib.lines import Line2D
+            ax_lgd = f.add_subplot(gs[i+1:, j+1])
+            ax_lgd.axis('off')
+        
             handles = [Line2D([0], [0], color=entry["color"], lw=4, label=entry["label"]) for entry in legend_data]
-            ax_lgd.legend(handles=handles, loc='center', fontsize=24, frameon=False)
+            ax_lgd.legend(handles=handles, loc='center', fontsize=22, frameon=False)
         
         if outputfile : 
             plt.savefig(outputfile)
