@@ -50,7 +50,7 @@ def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: s
     relative_fasta = filepaths["relative_fasta"] if "relative_fasta" in filepaths.keys() else None
     
     if relative_bed:
-        mutations = mm.read_mutations_from_BED(relative_bed)
+        mutations = mm.read_mutations_from_BED(relative_bed, muttype=muttype)
     else:
         mutations = mm.read_mutations_from_tsv(relative_tsv)
     

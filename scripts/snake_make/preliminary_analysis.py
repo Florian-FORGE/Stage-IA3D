@@ -39,7 +39,7 @@ def analysis_plot(prediction_log_path: str, analysis_path:str, l_score_types: li
     mat_comparisons = mat.build_CompareMatrices(filepathref=f"{prediction_log_path}/ref_orcarun.csv", 
                                                 filepathcomp=f"{prediction_log_path}/orcarun.csv")
 
-    if l_resol is None :
+    if l_resol is None or l_resol == ['None'] :
         l_resol = []
         if "insulation_count" in l_score_types or "insulation_correl" in l_score_types: 
             l_resol += ["1Mb", "2Mb", "4Mb"]
@@ -105,7 +105,7 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
     mat_comparisons = mat.build_CompareMatrices(filepathref=filepath["ref_orcarun"], 
                                                 filepathcomp=filepath["orcarun"])
 
-    if l_resol is None :
+    if l_resol is None or l_resol == ['None'] :
         l_resol = []
         if "insulation_count" in l_score_types or "insulation_correl" in l_score_types: 
             l_resol += ["1Mb", "2Mb", "4Mb"]
@@ -118,19 +118,20 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
 
         if os.path.exists(plots_path) :
             os.remove(plots_path)
-
-        if not show_rdm:
-            nb_scores = len(l_score_types)
-            height_ratios = [0.9] + [0.75/nb_scores for _ in range(nb_scores)]
-            width_ratios = [45, 5, 45, 5, 45]
-            gs = GridSpec(nrows= 1 + nb_scores, ncols=5, height_ratios=height_ratios, width_ratios=width_ratios)
-            f = plt.figure(clear=True, figsize=(60, 33.75))
-
-            with PdfPages(plots_path, keep_empty=False) as pdf:
+        
+        with PdfPages(plots_path, keep_empty=False) as pdf:
+        
+            if not show_rdm:
+                nb_scores = len(l_score_types)
+                height_ratios = [0.9] + [0.75/nb_scores for _ in range(nb_scores)]
+                width_ratios = [45, 5, 45, 5, 45]
+                gs = GridSpec(nrows= 1 + nb_scores, ncols=5, height_ratios=height_ratios, width_ratios=width_ratios)
+                f = plt.figure(clear=True, figsize=(60, 33.75))
+                
                 log_info += f"To produce the plots in plots_{resol}.pdf the following method and arguments were used :\n"
 
-                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f)
-                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f)\n"
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f, show_legend=True)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f, show_legend=True)\n"
 
                 mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2)
                 log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2)\n"
@@ -145,21 +146,20 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
                 ax = f.add_subplot(gs[1:nb_scores+1, 2])
                 mat_comparisons.dispersion_plot(merged_by=merged_by, l_resol=[resol], gs=gs, f=f, ax=ax)
                 log_info += f"mat_comparisons.dispersion_plot(merged_by={merged_by}, l_resol=[{resol}], gs=gs, f=f, ax=ax)\n"
-        
-        else :
-            nb_scores = len(l_score_types)
-            # height_ratios = [1] + [0.99/nb_scores for _ in range(nb_scores)]
-            width_ratios = [45, 5, 45, 5, 45, 5, 45]
-            gs = GridSpec(nrows= 1 + nb_scores, ncols=7, width_ratios=width_ratios)
-            f = plt.figure(clear=True, figsize=(80, 45))
+                
+            else :
+                nb_scores = len(l_score_types)
+                # height_ratios = [1] + [0.99/nb_scores for _ in range(nb_scores)]
+                width_ratios = [45, 5, 45, 5, 45, 5, 45]
+                gs = GridSpec(nrows= 1 + nb_scores, ncols=7, width_ratios=width_ratios)
+                f = plt.figure(clear=True, figsize=(80, 45))
 
-            rdm = rd.randint(0, len(mat_comparisons.comp_dict)-2)
-
-            with PdfPages(plots_path, keep_empty=False) as pdf:
+                rdm = rd.randint(0, len(mat_comparisons.comp_dict)-2)
+                
                 log_info += f"To produce the plots in plots_{resol}.pdf the following method and arguments were used :\n"
 
-                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f)
-                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f)\n"
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f, show_legend=True)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f, show_legend=True)\n"
 
                 mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2)
                 log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2)\n"
@@ -182,9 +182,9 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
                 mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=True, score_type = "insulation_count", gs=gs, f=f, ax=ax)
                 log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = insulation_count, gs=gs, f=f, ax=ax)\n"
                        
-            pdf.savefig()
-            pdf.close()
-            log_info += f"\n"
+        pdf.savefig()
+        pdf.close()
+        log_info += f"\n"
     
     log_path = f"{analysis_path}/plots.log"
     with open(log_path, "w") as fout:
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     l_score_types = args.l_score_types.split(",")
     # l_comp_types = args.l_comp_types.split(",") #used for analysis_plot
     l_resol = args.l_resol.split(",") if args.l_resol is not None else None
-    show_rdm=bool(args.show_rdm)
+    show_rdm = bool(args.show_rdm.lower() == "true") if args.show_rdm is not None else False
    
     analysis_slide(prediction_log_path=args.prediction_log_path, 
                   analysis_path=args.analysis_path, 

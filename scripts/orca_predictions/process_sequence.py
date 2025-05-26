@@ -1,5 +1,4 @@
 import argparse
-import re
 import textwrap
 import pickle
 import numpy as np
