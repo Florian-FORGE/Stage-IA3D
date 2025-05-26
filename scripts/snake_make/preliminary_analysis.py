@@ -8,32 +8,36 @@ sys.path.append(f"{c_path}/orcanalyse")
 import matrices as mat
 from matplotlib.backends.backend_pdf import PdfPages
 
-import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+
+import random as rd
 
 
-def analysis_plot(builder_path: str, analysis_path:str, l_score_types: list, l_comp_types: list, merged_by:str = None, l_resol: list = None):
+def analysis_plot(prediction_log_path: str, analysis_path:str, l_score_types: list, l_comp_types: list, merged_by:str = None, l_resol: list = None):
     """
-    Generates a dispersion plot by comparing matrices built from reference and comparison CSV files.
-
-    Args:
-        builder_path (str): The path to the directory containing the reference ('ref_orcarun.csv') 
-                            and comparison ('orcarun.csv') CSV files.
-        analysis_file (str): The path to the output directory where the plots will be saved.
-
-    Behavior:
-        - Builds comparison matrices using the provided CSV files.
-        - If the specified output file exists, it is removed.
-        - If the specified output directory does not exist, it is created.
-        - Generates and saves the dispersion plot to the specified output location.
-
-    Raises:
-        OSError: If there is an issue with file or directory operations.
+    
     """
     if not os.path.exists(analysis_path):
         os.makedirs(analysis_path)
+
+    with open(prediction_log_path, "r") as fin:
+        file_data = [line.strip().split("\t") for line in fin if not line.startswith("#")]
     
-    mat_comparisons = mat.build_CompareMatrices(filepathref=f"{builder_path}/ref_orcarun.csv", 
-                                                filepathcomp=f"{builder_path}/orcarun.csv")
+    if len(file_data) == 1 :
+        filepath = {file_data[0][i].split("/")[-1].split(".")[0] : file_data[0][i] 
+                                                                    for i in range(len(file_data[0]))}
+    else : 
+        raise ValueError(f"The data in {prediction_log_path} is not in the right format, "
+                         f"resulting in this reading :\n{file_data}\n...Exiting.")
+    
+    required_keys = {"ref_orcarun", "orcarun"}
+    if any(key not in filepath for key in required_keys):
+        raise ValueError(f"The data in {prediction_log_path} is not in the right format, "
+                         f"resulting in this reading :\n{filepath}\n...Exiting.")
+    
+    mat_comparisons = mat.build_CompareMatrices(filepathref=f"{prediction_log_path}/ref_orcarun.csv", 
+                                                filepathcomp=f"{prediction_log_path}/orcarun.csv")
 
     if l_resol is None :
         l_resol = []
@@ -67,6 +71,7 @@ def analysis_plot(builder_path: str, analysis_path:str, l_score_types: list, l_c
                 pdf.savefig()
                 log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type={comp_type}, l_score_types={l_score_types}, mutation=True)\n"
             
+            
             pdf.close()
             log_info += f"\n"
     
@@ -75,6 +80,125 @@ def analysis_plot(builder_path: str, analysis_path:str, l_score_types: list, l_c
         fout.write(log_info)
 
 
+
+def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: list, merged_by:str = None, l_resol: list = None, show_rdm: bool = False):
+    """
+    """
+    if not os.path.exists(analysis_path):
+        os.makedirs(analysis_path)
+    
+    with open(prediction_log_path, "r") as fin:
+        file_data = [line.strip().split("\t") for line in fin if not line.startswith("#")]
+    
+    if len(file_data) == 1 :
+        filepath = {file_data[0][i].split("/")[-1].split(".")[0] : file_data[0][i] 
+                                                                    for i in range(len(file_data[0]))}
+    else : 
+        raise ValueError(f"The data in {prediction_log_path} is not in the right format, "
+                         f"resulting in this reading :\n{file_data}\n...Exiting.")
+    
+    required_keys = {"ref_orcarun", "orcarun"}
+    if any(key not in filepath for key in required_keys):
+        raise ValueError(f"The data in {prediction_log_path} is not in the right format, "
+                         f"resulting in this reading :\n{filepath}\n...Exiting.")
+    
+    mat_comparisons = mat.build_CompareMatrices(filepathref=filepath["ref_orcarun"], 
+                                                filepathcomp=filepath["orcarun"])
+
+    if l_resol is None :
+        l_resol = []
+        if "insulation_count" in l_score_types or "insulation_correl" in l_score_types: 
+            l_resol += ["1Mb", "2Mb", "4Mb"]
+        if "PC1" in l_score_types : 
+            l_resol += ["8Mb", "16Mb", "32Mb"]
+    
+    log_info = ""
+    for resol in l_resol :
+        plots_path = f"{analysis_path}/plots_{resol}.pdf"
+
+        if os.path.exists(plots_path) :
+            os.remove(plots_path)
+
+        if not show_rdm:
+            nb_scores = len(l_score_types)
+            height_ratios = [0.9] + [0.75/nb_scores for _ in range(nb_scores)]
+            width_ratios = [45, 5, 45, 5, 45]
+            gs = GridSpec(nrows= 1 + nb_scores, ncols=5, height_ratios=height_ratios, width_ratios=width_ratios)
+            f = plt.figure(clear=True, figsize=(60, 33.75))
+
+            with PdfPages(plots_path, keep_empty=False) as pdf:
+                log_info += f"To produce the plots in plots_{resol}.pdf the following method and arguments were used :\n"
+
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f)\n"
+
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2)\n"
+
+                mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=False, score_type = "insulation_count", gs=gs, f=f, j=4)
+                log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = insulation_count, gs=gs, f=f, j=4)\n"
+                
+                ax = f.add_subplot(gs[1:nb_scores+1, 4])
+                mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=False, score_type = "PC1", gs=gs, f=f, ax=ax)
+                log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = PC1, gs=gs, f=f, j=4)\n"
+                
+                ax = f.add_subplot(gs[1:nb_scores+1, 2])
+                mat_comparisons.dispersion_plot(merged_by=merged_by, l_resol=[resol], gs=gs, f=f, ax=ax)
+                log_info += f"mat_comparisons.dispersion_plot(merged_by={merged_by}, l_resol=[{resol}], gs=gs, f=f, ax=ax)\n"
+        
+        else :
+            nb_scores = len(l_score_types)
+            # height_ratios = [1] + [0.99/nb_scores for _ in range(nb_scores)]
+            width_ratios = [45, 5, 45, 5, 45, 5, 45]
+            gs = GridSpec(nrows= 1 + nb_scores, ncols=7, width_ratios=width_ratios)
+            f = plt.figure(clear=True, figsize=(80, 45))
+
+            rdm = rd.randint(0, len(mat_comparisons.comp_dict)-2)
+
+            with PdfPages(plots_path, keep_empty=False) as pdf:
+                log_info += f"To produce the plots in plots_{resol}.pdf the following method and arguments were used :\n"
+
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f)\n"
+
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2)\n"
+
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{rdm}"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, gs=gs, f=f, j=4)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types=[], mutation=True, gs=gs, f=f, j=4)\n"
+
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{rdm}"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=6)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=6)\n"
+
+                ax = f.add_subplot(gs[1:nb_scores+1, 2])
+                mat_comparisons.dispersion_plot(merged_by=merged_by, l_resol=[resol], gs=gs, f=f, ax=ax)
+                log_info += f"mat_comparisons.dispersion_plot(merged_by={merged_by}, l_resol=[{resol}], gs=gs, f=f, ax=ax)\n"
+                
+                ax = f.add_subplot(gs[1:nb_scores+1, 4])
+                mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=True, score_type = "PC1", gs=gs, f=f, ax=ax)
+                log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = PC1, gs=gs, f=f, ax=ax)\n"
+                
+                ax = f.add_subplot(gs[1:nb_scores+1, 6])
+                mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=True, score_type = "insulation_count", gs=gs, f=f, ax=ax)
+                log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = insulation_count, gs=gs, f=f, ax=ax)\n"
+                       
+            pdf.savefig()
+            pdf.close()
+            log_info += f"\n"
+    
+    log_path = f"{analysis_path}/plots.log"
+    with open(log_path, "w") as fout:
+        fout.write(log_info)
+
+    global_log_path = "/".join(prediction_log_path.split("/")[:-1]) if prediction_log_path.split("/")[-1] == "prediction.log" else prediction_log_path
+    global_log_path += "/analysis.log"
+    if os.path.exists(global_log_path) :
+        os.remove(global_log_path)
+    
+    with open(global_log_path, "w") as fglog :
+        fglog.write(f"# The following function as successfully been executed:\n")
+        fglog.write(f"analysis_slide(prediction_log_path={prediction_log_path}, analysis_path={analysis_path}, l_score_types={l_score_types}, "
+                    f"merged_by={merged_by}, l_resol={l_resol},show_rdm={show_rdm})\n")
 
 
 
@@ -86,15 +210,15 @@ def parse_arguments():
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
     
-    parser.add_argument("--builder_path",
+    parser.add_argument("--prediction_log_path",
                        required=True, help="The path to the directory in which the two files 'ref_orarun.csv' and " \
                                            "'orarun.csv' are srored.")
     parser.add_argument("--analysis_path",
                         required=True, help='The path to the directory in which the analysis plots will be saved.')
     parser.add_argument("--l_score_types",
                         required=True, help='The list of scores for which plots should specifically be done.')
-    parser.add_argument("--l_comp_types", 
-                        required=True, help="The list of comparison types to display (at this point 'triangular' and 'substract' are supported).")
+    # parser.add_argument("--l_comp_types", 
+    #                     required=True, help="The list of comparison types to display (at this point 'triangular' and 'substract' are supported).") #used for analysis_plot
     parser.add_argument("--merged_by",
                         required=False, help="A pattern in the name of paticular runs, if there are runs which data should " \
                                              "be treated as a single dataset.")
@@ -102,6 +226,8 @@ def parse_arguments():
                         required=False, help="The list of resolutions to study. If not specified, the more " \
                                                         "representative resolutions for the given score types will " \
                                                         "automatically be selected.")
+    parser.add_argument("--show_rdm", 
+                        required=False, help="Whether to show the heatmaps for one random prediction from the randomly mutated experiments.")
     
     args = parser.parse_args()
 
@@ -112,14 +238,15 @@ if __name__ == '__main__':
     args = parse_arguments()
 
     l_score_types = args.l_score_types.split(",")
-    l_comp_types = args.l_comp_types.split(",")
+    # l_comp_types = args.l_comp_types.split(",") #used for analysis_plot
     l_resol = args.l_resol.split(",") if args.l_resol is not None else None
+    show_rdm=bool(args.show_rdm)
    
-    analysis_plot(builder_path=args.builder_path, 
+    analysis_slide(prediction_log_path=args.prediction_log_path, 
                   analysis_path=args.analysis_path, 
                   l_score_types=l_score_types, 
-                  l_comp_types=l_comp_types, 
                   merged_by=args.merged_by,
-                  l_resol=l_resol)
+                  l_resol=l_resol,
+                  show_rdm=show_rdm)
    
 

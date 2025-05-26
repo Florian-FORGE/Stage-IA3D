@@ -67,7 +67,7 @@ def relative_bed(bed: str,
         r_start = int(fields[1]) - start
         r_end = int(fields[2]) - start
 
-        new_line = "\t".join([f"fake_chr({chrom})", f"{r_start}", f"{r_end}"] + fields[3:])
+        new_line = "\t".join([f"fake_{chrom}", f"{r_start}", f"{r_end}"] + fields[3:])
         new_bed += f"{new_line}\n"
     
     
@@ -156,7 +156,7 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
     
     fasta_handle = FastaFile(fasta)
     ref = fasta_handle.fetch(chrom, start-1, end)
-    seq_record = SeqRecord(Seq(ref).upper(), id=f"fake_chr({chrom})",
+    seq_record = SeqRecord(Seq(ref).upper(), id=f"fake_{chrom}",
                                description=f"\t{(end-start)//1e6}Mb extracted from {name}\tOffset (1-based) : {start}")
     
     fasta_path = f"{output_path}/sequence.fa"
@@ -173,6 +173,8 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
 
         with open(new_bed_path, "w") as f :
             f.write(new_bed)
+        
+        mutation_line = f"Relative_bed\t{new_bed_path}"
 
     else:
         df = relative_tsv(tsv=tsv, chrom=chrom, start=start, end=end)
@@ -182,16 +184,29 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
             os.remove(new_bed_path)
 
         df.to_csv(new_bed_path, sep="\t", index=False, header=True)
+
+        mutation_line = f"Relative_tsv\t{new_bed_path}"
     
     log_path = f"{output_path}/resume.log"
     with open(log_path, "w") as flog :
-        flog.write(f"The relevant genome was saved in : {fasta_path}\n"
+        flog.write(f"The relative genome was saved in : {fasta_path}\n"
                    "The reference genome used to produce this relative sequence "
                    f"was from : {fasta}\n"
                    "The relevant mutations (with relative positions) to apply "
                    f"were stored in : {new_bed_path}\n"
                    "The offset for the relative mutations and the absolute start "
                    f"position of the sequence (1_based) is : {start}")
+    
+    global_log_path = "/".join(mut_path.split("/")[:-1]) if mut_path.split("/")[-1] == "genome" else mut_path
+    global_log_path += "/abs_to_rel.log"
+    if os.path.exists(global_log_path) :
+        os.remove(global_log_path)
+    
+    with open(global_log_path, "w") as fglog :
+        fglog.write(f"Relative_fasta\t{fasta_path}\n"
+                    f"{mutation_line}\n"
+                    f"Chrom_name\tfake_{chrom}")
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -230,4 +245,5 @@ if __name__ == '__main__':
                              mut_path=args.mut_path,
                              region=region)
    
+
 

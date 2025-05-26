@@ -13,7 +13,7 @@ from Bio import SeqIO
 
 
 
-def mutate_and_rdm_mutations(relative_bed, relative_tsv, relative_fasta, mut_path: str, muttype: str = "shuffle", nb_random: int = 0):
+def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: str = "shuffle", nb_random: int = 0):
     """
     Applies mutations to a reference sequence and generates random mutations if specified.
     This function processes a given region of a reference sequence by applying mutations
@@ -40,6 +40,15 @@ def mutate_and_rdm_mutations(relative_bed, relative_tsv, relative_fasta, mut_pat
         - The function ensures that random mutations do not overlap with existing mutations.
         - The random seed for generating mutations is incremented for each random mutation set.
     """
+    with open(abs_to_rel_log_path, "r") as fin:
+        lines = [line.strip().split("\t") for line in fin if not line.startswith("#")]
+    
+    filepaths = {lines[i][0].lower() : lines[i][1] for i in range(len(lines))}
+
+    relative_bed = filepaths["relative_bed"] if "relative_bed" in filepaths.keys() else None
+    relative_tsv = filepaths["relative_tsv"] if "relative_tsv" in filepaths.keys() else None
+    relative_fasta = filepaths["relative_fasta"] if "relative_fasta" in filepaths.keys() else None
+    
     if relative_bed:
         mutations = mm.read_mutations_from_BED(relative_bed)
     else:
@@ -67,6 +76,16 @@ def mutate_and_rdm_mutations(relative_bed, relative_tsv, relative_fasta, mut_pat
         trace = mutator.get_trace()
         trace.to_csv(f"{mut_path}/{name}/trace_{name}.csv", 
                 sep="\t", index=False, header=True)
+    
+    global_log_path = "/".join(mut_path.split("/")[:-1]) if mut_path.split("/")[-1] == "genome" else mut_path
+    global_log_path += "/mutate.log"
+    if os.path.exists(global_log_path) :
+        os.remove(global_log_path)
+    
+    with open(global_log_path, "w") as fglog :
+        fglog.write(f"# All relative fasta files and traces:\n")
+        for name in mutators.keys() :
+            fglog.write(f"{mut_path}/{name}/sequence.fa\t{mut_path}/{name}/trace_{name}.csv\n")
         
 
 
@@ -76,16 +95,10 @@ def parse_arguments():
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
     
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--relative_bed",
-                       help="the relative mutation file in bed format.")
-    group.add_argument('--relative_tsv',
-                        help='the relative mutation file in another format, see documentation for the format.')
-    
-    parser.add_argument('--relative_fasta',
-                        required=True, help='the relative genome fasta file.')
+    parser.add_argument('--abs_to_rel_log_path',
+                        required=True, help="The path to a .log file in which the path to the genome and mutation file to use are given (1 line per file and structured as follow: 'name\tpath').")
     parser.add_argument("--mut_path",
-                        required=True, help="the path to the output directory to store the relative sequence and bed.")
+                        required=True, help="The path to the output directory to store the relative sequences and traces.")
     parser.add_argument("--muttype", 
                         required=False, help="The mutation type to apply to the randomly mutated genomes.")
     parser.add_argument("--nb_random",
@@ -101,9 +114,7 @@ if __name__ == '__main__':
     args = parse_arguments()
     
     muttype = "shuffle" if args.muttype is None else args.muttype
-    mutate_and_rdm_mutations(relative_bed=args.relative_bed, 
-                             relative_tsv=args.relative_tsv, 
-                             relative_fasta=args.relative_fasta, 
+    mutate_and_rdm_mutations(abs_to_rel_log_path=args.abs_to_rel_log_path, 
                              mut_path=args.mut_path, 
                              muttype=muttype, 
                              nb_random=args.nb_random)

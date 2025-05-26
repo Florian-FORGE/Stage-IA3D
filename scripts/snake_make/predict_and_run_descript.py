@@ -14,11 +14,9 @@ import pandas as pd
 
 
 
-def predict_and_orcarun_descript(chrom: str, 
-                                 prediction_prefix: str, 
+def predict_and_orcarun_descript(prediction_prefix: str, 
                                  resol_model: str,
-                                 nb_random: int, 
-                                 mut_path: str, 
+                                 mutate_log_path: str, 
                                  mpos: int, 
                                  cool_resol: int, 
                                  strict: bool, 
@@ -26,7 +24,7 @@ def predict_and_orcarun_descript(chrom: str,
                                  use_cuda: bool, 
                                  use_memmapgenome: bool, 
                                  pred_path: str, 
-                                 ref_fasta: str, 
+                                 abs_to_rel_log_path: str, 
                                  builder_path: str) :
     """
     Generates predictions and associated OrcaRun descriptions from a given sequence.
@@ -38,8 +36,7 @@ def predict_and_orcarun_descript(chrom: str,
         chrom (str): Chromosome identifier.
         prediction_prefix (str): Prefix for the prediction output files.
         resol_model (str): Resolution model to be used for predictions.
-        nb_random (int): Number of random mutations to process.
-        mut_path (str): Path to the directory containing mutation sequences.
+        mutate_log_path (str): Path to the directory containing mutation sequences.
         mpos (int): Mutation position.
         cool_resol (int): Resolution for the cool file.
         strict (bool): Whether to enforce strict processing.
@@ -57,22 +54,24 @@ def predict_and_orcarun_descript(chrom: str,
           containing metadata for the predictions.
     """
     data = []
-    repository = ["Wtd_mut"] + [f"Rdm_mut_{i}" for i in range (nb_random)]
-
-    repo_path = "/".join(mut_path.split("/")[:-1])
-    if pred_path is None :
-        pred_path = f"{repo_path}/predictions"
     
-    if builder_path is None :
-        builder_path = f"{repo_path}/matrices_builder"
+    with open(abs_to_rel_log_path, "r") as fin:
+        lines = [line.strip().split("\t") for line in fin if not line.startswith("#")]
+        data_rel = {lines[i][0].lower() : lines[i][1] for i in range(len(lines))}
+        ref_fasta = data_rel["relative_fasta"] if "relative_fasta" in data_rel.keys() else None
+        chrom = data_rel["chrom_name"] if "chrom_name" in data_rel.keys() else None
 
-    for name in repository:
+    with open(mutate_log_path, "r") as fin:
+        lines = [line.strip().split("\t") for line in fin if not line.startswith("#")]
+
+    for fasta_path, trace_path in lines:
+        name = fasta_path.split("/")[-2]
         ps.main(chrom=chrom,
                 output_prefix=f"{prediction_prefix}_{name}",
                 mutation=name,
                 resol_model=resol_model,
                 mpos=mpos,
-                fasta=f"{mut_path}/{name}/sequence.fa",
+                fasta=fasta_path,
                 cool_resol=cool_resol,
                 strict=strict,
                 padding_chr=padding_chr,
@@ -84,17 +83,15 @@ def predict_and_orcarun_descript(chrom: str,
         
         l_resol = mat.extract_resol_asc(path)
 
-        trace_path = f"{mut_path}/{name}/trace_{name}.csv"
-        
         data.append([f"orcarun_{name}", 
-                    f"{l_resol}", 
-                    f"{pred_path}/{prediction_prefix}_{name}", 
-                    f"{name}", 
-                    f"{mut_path.split('/')[-1]}", 
-                    f"MatrixView", 
-                    f"{ref_fasta}", 
-                    f"OrcaMatrix", 
-                    f"{trace_path}"])
+                     f"{l_resol}", 
+                     f"{pred_path}/{prediction_prefix}_{name}", 
+                     f"{name}", 
+                     f"{fasta_path}", 
+                     f"MatrixView", 
+                     f"{ref_fasta}", 
+                     f"OrcaMatrix", 
+                     f"{trace_path}"])
 
     head = ["name", "list_resol", "path", "gtype", "genome", "obj_type", "refgenome", "mtype", "trace_path"]
 
@@ -146,6 +143,15 @@ def predict_and_orcarun_descript(chrom: str,
     df_ref = pd.DataFrame([data_ref], columns=head)
     df_ref.to_csv(f"{builder_path}/ref_orcarun.csv", sep="\t", index=False, header=True, mode='w')
 
+    global_log_path = "/".join(mutate_log_path.split("/")[:-1]) if mutate_log_path.split("/")[-1] == "mutate.log" else mutate_log_path
+    global_log_path += "/prediction.log"
+    if os.path.exists(global_log_path) :
+        os.remove(global_log_path)
+    
+    with open(global_log_path, "w") as fglog :
+        fglog.write(f"# The two files needed to build the matrices:\n")
+        fglog.write(f"{builder_path}/ref_orcarun.csv\t{builder_path}/orcarun.csv\n")
+
 
 
 def parse_arguments():
@@ -154,19 +160,23 @@ def parse_arguments():
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
     
-    parser.add_argument('--chrom',
-                        required=True, help='The chromosome name that should be looked for in the fasta file.')
+    # parser.add_argument('--chrom',
+    #                     required=True, help='The chromosome name that should be looked for in the fasta file.')
     parser.add_argument("--pred_prefix",
                         required=True, help="The the prediction prefix that is used to differentiate these runs from others.")
     parser.add_argument("--resol_model", 
                         required=False, help="The resolution model to use (either '32Mb' or '256Mb').")
-    parser.add_argument("--nb_random",
-                        required=True, type=int, 
-                        help="The number of randomly mutated genome file to generate (not counting the wanted mutation).")
-    parser.add_argument("--mut_path", 
+    parser.add_argument("--mutate_log_path", 
                         required=True, help="The path to the directory in which all the genome directories are stored.")
     parser.add_argument("--mpos", 
                         required=True, type=int, help="The coordinate to zoom into for multiscale prediction.")
+    parser.add_argument("--pred_path",
+                        required=True, help="Path to the directory where the predictions will be saved. Defaults to None. If None, the predictions will be saved in the same directory as the genomes.")
+    parser.add_argument("--abs_to_rel_log_path", 
+                        required=True, 
+                        help="The full path to the .log file of the relative genome.")
+    parser.add_argument("--builder_path", 
+                        required=True, help="Path to the directory where the data to build the matrices will be saved. Defaults to None. If None, the data will be saved in the same directory as the genomes.")
     parser.add_argument("--cool_resol", 
                         required=False, type=int, default=128_000, 
                         help="The resolution of a .mcool file that could be used for comparison. Used to achieve good alignment of bins (the start poition should be divisible by cool_resol). Defaults to 128_000.")
@@ -181,13 +191,6 @@ def parse_arguments():
     parser.add_argument("--use_memmapgenome", 
                         required=False, type=bool, default=True, 
                         help=" Whether to use memmory-mapped genome. Defaults to True.")
-    parser.add_argument("--pred_path",
-                        required=False, help="Path to the directory where the predictions will be saved. Defaults to None. If None, the predictions will be saved in the same directory as the genomes.")
-    parser.add_argument("--ref_fasta", 
-                        required=True, 
-                        help="The full path to the fasta file of the reference genome (can be a relative sequence)")
-    parser.add_argument("--builder_path", 
-                        required=False, help="Path to the directory where the data to build the matrices will be saved. Defaults to None. If None, the data will be saved in the same directory as the genomes.")
     
     args = parser.parse_args()
 
@@ -199,11 +202,9 @@ if __name__ == '__main__':
     args = parse_arguments()
     use_cuda = not args.no_cuda
     
-    predict_and_orcarun_descript(chrom=args.chrom, 
-                                 prediction_prefix=args.pred_prefix, 
+    predict_and_orcarun_descript(prediction_prefix=args.pred_prefix, 
                                  resol_model=args.resol_model, 
-                                 nb_random=args.nb_random, 
-                                 mut_path=args.mut_path, 
+                                 mutate_log_path=args.mutate_log_path, 
                                  mpos=args.mpos, 
                                  cool_resol=args.cool_resol, 
                                  strict=args.strict, 
@@ -211,6 +212,7 @@ if __name__ == '__main__':
                                  use_cuda=use_cuda, 
                                  use_memmapgenome=args.use_memmapgenome, 
                                  pred_path=args.pred_path, 
-                                 ref_fasta=args.ref_fasta, 
+                                 abs_to_rel_log_path=args.abs_to_rel_log_path, 
                                  builder_path=args.builder_path)
+
 
