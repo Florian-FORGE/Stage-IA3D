@@ -2,7 +2,7 @@ EXTREMUM_HEATMAP:
   Matrix: [-0.2, 3]
   RealMatrix: [-0.95, 1.8]
   OrcaMatrix: [-0.75, 1.5]
-  Substract_mats : [-1.25, .75]
+  Substract_mats : [-1.25, 0.75]
 
 COLOR_CHART:
   insulation_count: blue
