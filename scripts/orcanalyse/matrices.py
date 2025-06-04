@@ -4,7 +4,7 @@ from cooltools.api.eigdecomp import cis_eig
 import bioframe
 
 from scipy.stats import linregress, spearmanr
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, convolve 
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -559,17 +559,18 @@ class Matrix():
         genome_path (str) : the path to the reference genome to use for getting
         the right phasing_track.
         """
-        A = replace_nan_with_neighbors_mean(self.obs)
+        if self._PC1 is None :
+            A = replace_nan_with_neighbors_mean(self.obs)
 
-        phasing_track = self.get_phasing_track(genome_path=genome_path)["GC"].values
-                    
-        _, pc1 = cis_eig(A = A, n_eigs = 1, phasing_track=phasing_track)
-        
-        pc1 = pc1[0]
-        pc1 = replace_nan_with_neighbors_mean(list(pc1))
-        
-        self._PC1 = pc1.tolist()
-        return pc1.tolist()
+            phasing_track = self.get_phasing_track(genome_path=genome_path)["GC"].values
+                        
+            _, pc1 = cis_eig(A = A, n_eigs = 1, phasing_track=phasing_track)
+            
+            pc1 = pc1[0]
+            pc1 = replace_nan_with_neighbors_mean(list(pc1))
+            
+            self._PC1 = pc1.tolist()
+        return self._PC1
     
     @property
     def PC1(self):
@@ -734,7 +735,6 @@ class Matrix():
         
         return ax
     
-    
     def heatmap_overlay(self,
                         ax: axes,
                         compartment: bool = False,
@@ -799,18 +799,16 @@ class Matrix():
             mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
             for bin_idx in mut_pos :
                 # Highlight the mutated bin as a vertical band
-                h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.005, color='green', alpha=.5, label="Mutation")
-                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.995, color='green', alpha=.5)
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color='green', alpha=.5)
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color='green', alpha=.5)
+                h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.01, color='green', alpha=.5, label="Mutation")
+                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.99, color='green', alpha=.5)
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.01, color='green', alpha=.5)
+                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.99, color='green', alpha=.5)
             
             legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
             if legend is not None:
                 legend.set_title(legend.get_title().get_text(), prop={'size': 20})
                 for text in legend.get_texts():
                     text.set_fontsize(20)
-
-            
 
     def heatmap_plot(self,
                      gs: GridSpec,
@@ -838,6 +836,138 @@ class Matrix():
         elif show==True:
             plt.show()
     
+    @property
+    def saddle_mat(self) :
+        """
+        Method to produce the matrix used for saddle plotting. Values of the matrix 
+        (for each pixel) are treated as follow : log(mean(exp(value))), where mean is 
+        the mean of the quantile defined through PC1 values. This helps increase 
+        contrast betwen quantiles. 
+        
+        Returns
+        ----------
+            - new_m :
+                The matrix (observed over expected) which rows and columns were 
+                sorted by PC1 vallues (associating each to the corresponding bin).
+            - sorted_indices :
+                The list of bin positions sorted by PC1 values.
+         """
+        values = self.PC1
+        sorted_indices = sorted(range(len(values)), key=lambda k: values[k], reverse=True)
+
+        m = get_property(self, self.which_matrix(mtype="heatmap"))
+        m = m[np.ix_(sorted_indices, sorted_indices)]
+        m= np.exp(m)
+        
+        # Assign each row/column to a quantile based on PC1
+        n_bins = 48
+        pc1 = np.array(values)[sorted_indices]
+        quantile_edges = np.quantile(pc1, np.linspace(0, 1, n_bins + 1))
+        pc1_quantiles = np.digitize(pc1, quantile_edges[1:-1], right=True)
+
+        # For each cell, determine (row_quantile, col_quantile)
+        row_q = pc1_quantiles[:, None]
+        col_q = pc1_quantiles[None, :]
+        
+        a=0
+        # Compute mean for each quantile pair
+        new_m = np.zeros_like(m)
+        for rq in range(n_bins):
+            for cq in range(n_bins):
+                a+=1
+                mask = (row_q == rq) & (col_q == cq)
+                if np.any(mask):
+                    mean_val = np.nanmean(m[mask])
+                    new_m[mask] = mean_val
+                else:
+                    new_m[mask] = 0
+        new_m = np.log(new_m)
+        
+        return new_m, sorted_indices
+    
+        
+    def saddle_plot(self,
+                    gs: GridSpec,
+                    f: figure.Figure, 
+                    title: str = None,
+                    i: int = 0, 
+                    j: int = 0, 
+                    mutation: bool = False,
+                    output_file: str = None,
+                    show: bool = False
+                    ):
+        """
+        Method to produce the saddle plot associated with the matrix.
+        
+        Parameters
+        ----------
+        - gs : GridSpec
+            the grid layout to place subplots within a figure.
+        - f : figure.Figure
+            the object that holds all plot elements.
+        title : str
+            the title of the saddle plot (e.g. "PC1" or "insulation_count")
+        - i : int
+            the line in which the heatmap should plotted.
+        - j : int
+            the column in which the heatmap should be plotted.
+        - mutation : bool
+            whether to plot the mutation position of the matrix (if they are 
+            given to the Matrix builder). If True, then the mutations are  
+            highlighted. By default, mutation = False.
+        - output_file : str
+            the file path to save the plot. If None, then the plot is not saved.
+        - show : bool
+            whether to show the plot. If True, then the plot is shown.
+         """
+        m, sorted_indices = self.saddle_mat
+        
+        # vmin, vmax = self.get_extremum_heatmap()
+        vmin, vmax = -0.95, 0.95
+        f_p_val, titles, cmap = self.formatting(name=title)
+        ticks = [i for i in range(0, m.shape[0]+1, m.shape[0]//(len(f_p_val)-1))]
+        
+        ax = f.add_subplot(gs[i, j])
+        ax.imshow(m, 
+                  cmap=cmap, 
+                  interpolation='nearest', 
+                  aspect='auto', 
+                  vmin=vmin, 
+                  vmax=vmax)
+        
+        ax.set_title(f"{titles[0]}\n{title} - Chrom : {titles[1]}, "
+                     f"Start : {titles[2]}, End : {titles[3]}, "
+                     f"Resolution : {titles[4]} - {titles[5]}\n", fontsize=20)
+        
+        ax.set_yticks(ticks=ticks, labels=f_p_val)
+        ax.set_xticks(ticks=ticks, labels=f_p_val)
+        ax.tick_params(axis='both', labelsize=20)
+        format_ticks(ax, x=False, y=False)
+
+        if mutation :
+            mut_pos = list(set(num for start, stop in self.list_mutations for num in range(start, stop + 1)))
+            mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+            for bin_idx in mut_pos :
+                if bin_idx in sorted_indices :
+                    bin_idx = sorted_indices.index(bin_idx) 
+                    # Highlight the mutated bin as a vertical band
+                    h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.01, color='green', alpha=.5, label="Mutation")
+                    ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.99, color='green', alpha=.5)
+                    ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.01, color='green', alpha=.5)
+                    ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.99, color='green', alpha=.5)
+            
+            legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
+            if legend is not None:
+                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
+                for text in legend.get_texts():
+                    text.set_fontsize(20)
+
+        if output_file: 
+            plt.savefig(output_file, transparent=True)
+        elif show==True:
+            plt.show()
+        
+
     @property
     def prefix(self):
         return f"{self.__class__.__name__}_{self.gtype}"
@@ -1426,23 +1556,24 @@ def join_triangular_matrices(mat1: np.ndarray, mat2: np.ndarray):
     return new_mat
 
 
-def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, i: int = 0, j: int = 0):
+def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, i: int = 0, j: int = 0, saddle: bool = False):
     """
     """
     f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
 
     ax = f.add_subplot(gs[i, j])
 
-    mat_1 = get_property(mat1, mat1.which_matrix(mtype="heatmap"))
-    mat_2 = get_property(mat2, mat2.which_matrix(mtype="heatmap"))
+    mat_1 = mat1.saddle_mat[0] if saddle else get_property(mat1, mat1.which_matrix(mtype="heatmap"))
+    mat_2 = mat2.saddle_mat[0] if saddle else get_property(mat2, mat2.which_matrix(mtype="heatmap"))
     
     if comp_type == "triangular" :
         m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
-        vmin, vmax = mat1.get_extremum_heatmap()
+        vmin, vmax = [-0.95, 0.95] if saddle else mat1.get_extremum_heatmap()
     elif comp_type == "substract" :
         m = mat_2 - mat_1
         cmap = blue_cmap
-        vmin, vmax = config_data["EXTREMUM_HEATMAP"]["Substract_mats"]
+        coeff = (np.max(m) - np.min(m)) / .4
+        vmin, vmax = [-0.17*coeff, 0.23*coeff] if saddle else config_data["EXTREMUM_HEATMAP"]["Substract_mats"]
     else : 
         raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
     
@@ -1454,15 +1585,52 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
               vmax=vmax)
     
     if mutation :
-        color, alpha = ('orange', .75) if comp_type == "substract" else ('green', .5) 
-        mut_pos = list(set(num for start, stop in mat2.list_mutations for num in range(start, stop + 1)))
-        mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
-        for bin_idx in mut_pos :
+        color1, color2, alpha = ('orange', 'orange', .75) if comp_type == "substract" else ('green', 'green', .5)
+        hyp_mut_pos = False
+
+        sort_mut_pos1, sort_mut_pos2 = None, None
+        sorted_indices1 = mat1.saddle_mat[1] if saddle else sort_mut_pos1
+        sorted_indices2 = mat2.saddle_mat[1] if saddle else sort_mut_pos2
+        
+        if mat1.list_mutations is not None :
+            mut_pos1 = list(set(num for start, stop in mat1.list_mutations for num in range(start, stop + 1)))
+            mut_pos1 = [bin_idx for bin_idx in mut_pos1 if 0<=bin_idx<=249]
+            sort_mut_pos1 = [sorted_indices1.index(bin_idx) for bin_idx in mut_pos1] if saddle else mut_pos1
+        if mat2.list_mutations is not None :
+            mut_pos2 = list(set(num for start, stop in mat2.list_mutations for num in range(start, stop + 1)))
+            mut_pos2 = [bin_idx for bin_idx in mut_pos2 if 0<=bin_idx<=249]
+            sort_mut_pos2 = [sorted_indices2.index(bin_idx) for bin_idx in mut_pos2] if saddle else mut_pos2
+        
+        if saddle and (sort_mut_pos1 is None or sort_mut_pos2 is None) and comp_type == "triangular" :
+            sort_mut_pos1 = [sorted_indices1.index(bin_idx) for bin_idx in mut_pos2] \
+                                                            if sort_mut_pos1 is None \
+                                                            and sort_mut_pos2 is not None \
+                                                            else sort_mut_pos1
+            
+            sort_mut_pos2 = [sorted_indices1.index(bin_idx) for bin_idx in mut_pos2] \
+                                                            if sort_mut_pos2 is None \
+                                                            and sort_mut_pos1 is not None \
+                                                            else sort_mut_pos2
+            color1, color2 = ('#16BE00', '#0E330A')
+            hyp_mut_pos = True
+        else:
+            sort_mut_pos1 = sort_mut_pos2 if sort_mut_pos1 is None else sort_mut_pos1
+            sort_mut_pos2 = sort_mut_pos1 if sort_mut_pos2 is None else sort_mut_pos2
+        
+        if sort_mut_pos1 is None or sort_mut_pos2 is None :
+            raise ValueError(f"None of the matrices ({mat1.gtype}, {mat2.gtype}) have "
+                              "mutation related data...Exiting.")
+        
+        h, hyp = None, None
+        for bin_idx1, bin_idx2 in zip(sort_mut_pos1, sort_mut_pos2) :
             # Highlight the mutated bins
-            h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.005, color=color, alpha=alpha, label="Mutation")
-            ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.995, color=color, alpha=alpha)
-            ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.005, color=color, alpha=alpha)
-            ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.995, color=color, alpha=alpha)
+            h = ax.axvspan(bin_idx2 - 0.5, bin_idx2 + 0.5, ymax=.01, color=color1, alpha=alpha, label="Mutation")
+            ax.axhspan(bin_idx2 - 0.5, bin_idx2 + 0.5, xmax=.01, color=color1, alpha=alpha)
+            if hyp_mut_pos :
+                hyp = ax.axvspan(bin_idx1 - 0.5, bin_idx1 + 0.5, ymin=.99, color=color2, alpha=alpha, label="Hyp_mut_pos")
+            else :
+                ax.axvspan(bin_idx1 - 0.5, bin_idx1 + 0.5, ymin=.99, color=color2, alpha=alpha)
+            ax.axhspan(bin_idx1 - 0.5, bin_idx1 + 0.5, xmin=.99, color=color2, alpha=alpha)
 
     ax.set_title(f"{titles[0]}\nChrom : {titles[1]}, Start : {titles[2]}, "
                     f"End : {titles[3]}, Resolution : {titles[4]}\n", 
@@ -1476,17 +1644,20 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
     ax.tick_params(axis='both', labelsize=22)
     format_ticks(ax, x=False, y=False)
     if mutation :
-        legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
+        handles = [h] if h else [] 
+        handles += [hyp] if hyp else []
+        legend = ax.legend(handles=handles, loc='best', bbox_to_anchor=(0.98, 0.98)) \
+                                            if (sort_mut_pos1 != [] and sort_mut_pos2 != []) else None
         if legend is not None:
             legend.set_title(legend.get_title().get_text(), prop={'size': 20})
             for text in legend.get_texts():
                 text.set_fontsize(20)
     if comp_type == "triangular" :
-        ax.text(.98, .93, f"{mat1.genome}",
+        ax.text(.97, .9, f"{mat1.genome}",
                 transform=ax.transAxes, fontsize=22,
                 verticalalignment='top', horizontalalignment='right',
                 bbox=dict(boxstyle="round", facecolor="white"))
-        ax.text(.02, .07, f"{mat2.genome}",
+        ax.text(.03, .1, f"{mat2.genome}",
                 transform=ax.transAxes, fontsize=22,
                 verticalalignment='bottom', horizontalalignment='left',
                 bbox=dict(boxstyle="round", facecolor="white"))
@@ -1652,13 +1823,13 @@ class CompareMatrices():
         for run in l_run :
             if run == "ref" :
                 if as_Matrix :
-                    _matrices = [self.ref.di[resol] for resol in l_resol]
+                    _matrices = {resol: self.ref.di[resol] for resol in l_resol}
                 else :
                     _matrices = get_matrix(self.ref, mtype="count", l_resol=l_resol)
             
             else :
                 if as_Matrix :
-                    _matrices = [self.comp_dict[run].di[resol] for resol in l_resol]
+                    _matrices = {resol: self.comp_dict[run].di[resol] for resol in l_resol}
                 else :
                     _matrices = get_matrix(self.comp_dict[run], mtype="count", l_resol=l_resol)
             
@@ -2532,6 +2703,7 @@ class CompareMatrices():
                                                         "PC1", 
                                                         "insulation_correl"], 
                             mutation: bool = False, 
+                            saddle: bool = False, 
                             outputfile: str = None, 
                             show: bool = False, 
                             gs: GridSpec = None, 
@@ -2546,17 +2718,20 @@ class CompareMatrices():
                              "method to work...Exiting.")
         
         matrices = self.matrices(l_run=_2_run, l_resol=[resol], as_Matrix=True)
-        mat1 = matrices[_2_run[0]][0]
-        mat2 = matrices[_2_run[1]][0]
+        mat1 = matrices[_2_run[0]][resol]
+        mat2 = matrices[_2_run[1]][resol]
 
         if gs is None :
             nb_scores = len(l_score_types)
             ratios = [1] + [0.75/nb_scores for i in range(nb_scores)]
-            gs = GridSpec(nrows=1 + nb_scores, ncols=2, height_ratios=ratios, width_ratios=(98, 2))
-        f = plt.figure(clear=True, figsize=(20, 32)) if f is None else f
+            ncols = 2 if nb_scores > 0 else 1
+            width_ratios= (98, 2) if nb_scores > 0 else None
+            gs = GridSpec(nrows=1 + nb_scores, ncols=ncols, height_ratios=ratios, width_ratios=width_ratios)
+        f = plt.figure(clear=True, figsize=(20, (20+(6*nb_scores)))) if f is None else f
 
         # Heatmap
-        heatmap_matrices_comp(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, gs=gs, f=f, i=i, j=j)
+        heatmap_matrices_comp(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, 
+                              gs=gs, f=f, i=i, j=j, saddle=saddle)
 
         # Scores
         f_p_val = mat1.formatting()[0]
@@ -2597,6 +2772,53 @@ class CompareMatrices():
             plt.savefig(outputfile)
         elif show :
             plt.show()
+
+
+    def saddle_plots(self, 
+                     l_run: List[str] = None, 
+                     l_resol: List[str] = None, 
+                     mutation: bool = False, 
+                     outputfile: str = None,
+                     show: bool = False, 
+                     gs: GridSpec = None, 
+                     f: figure.Figure = None, 
+                     i: int = 0, 
+                     j: int = 0,  
+                     ) :
+        """
+
+        """
+        if l_run is None :
+            l_run = [name for name in self.comp_dict.keys()]
+        if l_resol is None :
+            l_resol = [f"{np.max([int(resol.split('Mb')[0]) for resol in self.ref.di.keys()])}Mb"]
+        
+        if gs is None :
+            gs = GridSpec(nrows=len(l_run), ncols=len(l_resol))
+        if f is None :
+            f = plt.figure(clear=True, figsize=(22*(len(l_resol)), 20*(len(l_run))))
+        
+        matrices = self.matrices(l_run=l_run, l_resol=l_resol, as_Matrix=True)
+
+        for k, name in enumerate(l_run) :
+            if name not in self.comp_dict.keys() and name != "ref":
+                raise ValueError(f"The run {l_run[i]} is not in the comp_dict...Exiting.")
+            
+            for l, resol in enumerate(l_resol) :
+                if resol not in self.ref.di.keys() :
+                    raise ValueError(f"The resolution {resol} is not in the reference MatrixView...Exiting.")
+                
+                mat = matrices[name][resol]
+                mut = False if mat.gtype == "wt" else mutation
+                mat.saddle_plot(gs=gs, f=f, i=i+k, j=j+l, title=f"Saddle_plot_{name}", mutation=mut)
+        
+        if outputfile: 
+            plt.savefig(outputfile, transparent=True)
+        elif show==True:
+            plt.show()
+            
+           
+
 
 
 
