@@ -186,7 +186,7 @@ def parse_arguments():
     parser.add_argument("--padding_chr", 
                         required=False, help="If resol_model is '256Mb', padding is generally needed to fill the sequence to 256Mb. The padding sequence will be extracted from the padding_chr.")
     parser.add_argument("--no_cuda", 
-                        required=False, action="store_true",
+                        required=False,
                         help="Whether to use CUDA for GPU acceleration. If False, CUDA is used. Defaults to False.")
     parser.add_argument("--use_memmapgenome", 
                         required=False, type=bool, default=True, 
@@ -200,7 +200,8 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
-    use_cuda = not args.no_cuda
+    no_cuda = bool(args.no_cuda.lower() == "true") if args.no_cuda is not None else True
+    use_cuda = not no_cuda
     
     predict_and_orcarun_descript(prediction_prefix=args.pred_prefix, 
                                  resol_model=args.resol_model, 
