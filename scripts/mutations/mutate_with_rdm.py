@@ -73,7 +73,8 @@ def read_mutations_from_BED(mutationfile,
             intervals.append(mutation)
     return intervals
 
-def read_mutations_from_tsv(mutationfile, 
+def read_mutations_from_tsv(mutationfile,
+                            trace: bool = True, 
                             relative: bool = False, 
                             start: int = None,
                             end: int = None) -> List[Mutation] :
@@ -89,16 +90,19 @@ def read_mutations_from_tsv(mutationfile,
     elif start is None : 
         start = 0
 
-    df = pd.read_csv(mutationfile, 
-                     sep="\t", 
-                     header=0, 
-                     dtype={'chrom': str, 
-                            'start': int, 
-                            'end': int, 
-                            'name': str, 
-                            'strand': str, 
-                            'operation': str, 
-                            'sequence': str})
+    if trace :
+        df = pd.read_csv(mutationfile, sep="\t")
+    else :
+        df = pd.read_csv(mutationfile, 
+                        sep="\t", 
+                        header=0, 
+                        dtype={'chrom': str, 
+                                'start': int, 
+                                'end': int, 
+                                'name': str, 
+                                'strand': str, 
+                                'operation': str, 
+                                'sequence': str})
     df_sorted = df.sort_values(by='chrom')
     intervals = []
     for _, row in df_sorted.iterrows():
