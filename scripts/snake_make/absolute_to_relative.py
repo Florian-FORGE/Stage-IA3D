@@ -67,7 +67,7 @@ def relative_bed(bed: str,
         r_start = int(fields[1]) - start
         r_end = int(fields[2]) - start
 
-        new_line = "\t".join([f"fake_{chrom}", f"{r_start}", f"{r_end}"] + fields[3:])
+        new_line = "\t".join([f"fake_{chrom}", f"{r_start}", f"{r_end}"] + fields[3] + ["-"] + fields[4:])
         new_bed += f"{new_line}\n"
     
     
