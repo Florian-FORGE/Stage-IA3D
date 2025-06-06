@@ -1,0 +1,118 @@
+import pandas as pd
+
+
+
+experiment_file = config["experiments"]
+
+experiments = pd.read_csv(experiment_file, sep='\t', 
+                        dtype={"expe": str}).set_index("expe", drop=False)
+
+
+workingdir = "%s/%s" % (workflow.basedir, config['workdir'])
+ 
+workdir: workingdir
+
+
+rule all:
+    input:
+        expand("experience/{expe}/analysis.log", expe=experiments.index)
+
+
+rule abs_to_rel:
+    input: 
+        genome=config["genome"],
+        mutations=lambda wildcards: experiments.loc[wildcards.expe]["mutations"]
+    
+    output:
+        "experience/{expe}/abs_to_rel.log"
+
+    params:
+        outdir="experience/{expe}/genome",
+        region=config["region"]
+
+    shell:
+        """
+        python ../scripts/snake_make/absolute_to_relative.py \
+               --bed {input.mutations} \
+               --fasta {input.genome} \
+               --mut_path {params.outdir} \
+               --region {params.region}
+        """
+
+rule mutate:
+    input:
+        rel_log="experience/{expe}/abs_to_rel.log"
+        
+
+    output:
+        "experience/{expe}/mutate.log"
+
+    params:
+        outdir="experience/{expe}/genome",
+        nb_random=config["nb_random"],
+        muttype=config["muttype"]
+
+    shell:
+        """
+        python ../scripts/snake_make/mutate_and_rdm.py \
+               --abs_to_rel_log_path {input.rel_log} \
+               --mut_path {params.outdir} \
+               --muttype {params.muttype} \
+               --nb_random {params.nb_random}
+        """
+
+rule predict:
+    input:
+        mut_log="experience/{expe}/mutate.log", 
+        rel_log="experience/{expe}/abs_to_rel.log"
+
+    output:
+        "experience/{expe}/prediction.log"
+
+    params:
+        pred_prefix="{expe}",
+        resol_model=config["resol_model"],
+        mpos=config["mpos"],
+        pred_path="experience/{expe}/predictions",
+        builder_path="experience/{expe}/matrices_builder", 
+        no_cuda=config["no_cuda"]
+
+
+
+    shell:
+        """
+        python ../scripts/snake_make/predict_and_run_descript.py \
+               --pred_prefix {params.pred_prefix} \
+               --resol_model {params.resol_model} \
+               --mutate_log_path {input.mut_log} \
+               --mpos {params.mpos} \
+               --pred_path {params.pred_path} \
+               --abs_to_rel_log_path {input.rel_log} \
+               --builder_path {params.builder_path} \
+               --no_cuda {params.no_cuda}
+        """
+
+rule analysis:
+    input:
+        predict_log="experience/{expe}/prediction.log"
+    
+    output:
+        "experience/{expe}/analysis.log"
+    
+    params:
+        analysis_path="experience/{expe}/analysis",
+        score_types=config["score_types"],
+        merged_by=config["merged_by"],
+        resol=config["resol"],
+        show_rdm=config["show_rdm"]
+    
+    shell:
+        """
+        python ../scripts/snake_make/preliminary_analysis.py \
+               --prediction_log_path {input.predict_log} \
+               --analysis_path {params.analysis_path} \
+               --l_score_types {params.score_types} \
+               --merged_by {params.merged_by} \
+               --l_resol {params.resol} \
+               --show_rdm {params.show_rdm}
+        """

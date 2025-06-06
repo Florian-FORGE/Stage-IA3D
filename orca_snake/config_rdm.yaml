@@ -1,0 +1,14 @@
+workdir: work
+experiments: /work/user/fforge/work/orca_snake/lil_rdm.tsv
+length: 32_000_000
+chrom_name: fake_chr9
+region: chr:1-32000000
+muttype: insertion
+nb_random: 0
+resol_model: 32Mb
+mpos: 15_872_000
+no_cuda: True
+score_types: insulation_count,PC1
+merged_by: rdm
+resol: None
+show_rdm: False

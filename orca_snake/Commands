@@ -1,0 +1,1 @@
+snakemake --configfile config.yaml --profile genotoul -j 1 -p

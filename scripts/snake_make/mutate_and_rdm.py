@@ -13,7 +13,7 @@ from Bio import SeqIO
 
 
 
-def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: str = "shuffle", nb_random: int = 0):
+def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: str = "shuffle", nb_random: int = 0, rdm_pos: bool = True):
     """
     Applies mutations to a reference sequence and generates random mutations if specified.
     This function processes a given region of a reference sequence by applying mutations
@@ -59,7 +59,11 @@ def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: s
     mutators = {"Wtd_mut" : m.Mutator(fasta_handle, mutations)}
     for i in range(nb_random):
         rdm_seed = 3+i
-        random_mutations = mm.generate_random_mutations(mutations=mutations, genome=relative_fasta, rdm_seed=rdm_seed, muttype=muttype)
+        if rdm_pos:
+            random_mutations = mm.generate_random_pos_mutations(mutations=mutations, genome=relative_fasta, rdm_seed=rdm_seed, muttype=muttype)
+        else :
+            random_mutations = mm.generate_random_mutations(mutations=mutations, rdm_seed=rdm_seed)
+        
         mutators[f"Rdm_mut_{i}"] = m.Mutator(fasta_handle, random_mutations)
     
     for name, mutator in mutators.items() :
@@ -104,7 +108,10 @@ def parse_arguments():
     parser.add_argument("--nb_random",
                         required=True, type=int, 
                         help="The number of randomly mutated genome file to generate (not counting the wanted mutation).")
-    
+    parser.add_argument("--rdm_seq",
+                        required=False, 
+                        help="Weither the mutations will be generated at random positions in the genome (by default), or at the same positions as in the input file bu putting random sequences in place of this mutations (if 'True').")
+        
     args = parser.parse_args()
 
     return args
@@ -113,9 +120,13 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
     
+    rdm_seq = bool(args.rdm_seq.lower() == "true") if args.rdm_seq is not None else False
+    rdm_pos = not rdm_seq
+
     muttype = "shuffle" if args.muttype is None else args.muttype
     mutate_and_rdm_mutations(abs_to_rel_log_path=args.abs_to_rel_log_path, 
                              mut_path=args.mut_path, 
                              muttype=muttype, 
-                             nb_random=args.nb_random)
+                             nb_random=args.nb_random, 
+                             rdm_pos=rdm_pos)
 

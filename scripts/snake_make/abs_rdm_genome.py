@@ -32,36 +32,115 @@ def rdm_genome_alt(length: int):
     """
     Generate a random DNA genome string of given length (with variations on the 
     probability of nucleotides being chosen for random domain). Length should be 
-    greater than 100.
+    greater than 1000.
     """
-    if length <= 100:
-        raise ValueError("Length should be greater than 100.")
+    if length <= 1000:
+        raise ValueError("Length should be greater than 1000.")
     
     genome = ""
     
-    bases = ["A", "T", "C", "G"]
-    bases_CGA = ["A", "C", "G"]
-    bases_CGT = ["T", "C", "G"]
-    bases_GTA = ["A", "T", "G"]
-    bases_CTA = ["A", "T", "C"]
-    bases_CG = ["C", "G"]
-    bases_TA = ["A", "T"]
+    bases = (["A", "T", "C", "G"], [.22, .22, .28, .28])
+    bases_CGA = (["A", "C", "G"], [.28, .36, .36])
+    bases_CGT = (["T", "C", "G"], [.28, .36, .36])
+    bases_GTA = (["A", "T", "G"], [.31, .31, .38])
+    bases_CTA = (["A", "T", "C"], [.31, .31, .38])
+    bases_CG = (["C", "G"], [.5, .5])
+    bases_TA = (["A", "T"], [.5, .5])
+    bases_GT = (["G", "T"], [.56, .44])
+    bases_CA = (["A", "C"], [.44, .56])
+    bases_GA = (["G", "A"], [.56, .44])
+    bases_CT = (["C", "T"], [.44, .56])
+    bases_A = (["A"], [1.0])
+    bases_T = (["T"], [1.0])
+    bases_C = (["C"], [1.0])
+    bases_G = (["G"], [1.0])
 
-    domain_bnd = [0] + random.sample(range(25, length-25), k=random.randint(1, length//10)) + [length]
+    random.seed(23)  # For reproducibility
+    domain_bnd = [0] + random.sample(range(250, length-250), k=random.randint(1, length//1000)) + [length]
+    # domain_bnd = [0] + random.sample(range(25, length-25), k=random.randint(1, length//10)) + [length]
     domain_bnd.sort()
-    logging.info(f"Randomly chosen domain boundaries : {domain_bnd}")
+    if len(domain_bnd) < 1000 :
+        logging.info(f"Randomly chosen domain boundaries :\n{domain_bnd }")
+    else :
+        logging.info(f"Too many values ({len(domain_bnd)})...\n"
+                     f"Randomly chosen domain boundaries :\n{domain_bnd[:100]}\n...\n{domain_bnd[-100:]}")
     info_bases = []
+    info_pal = []
+    chosen_bases = ()
+    _chosen_bases = ()
+    
     for i in range(len(domain_bnd)-1):
-        possible_bases = [bases, bases_CGA, bases_CGT, bases_GTA, bases_CTA, bases_CG, bases_TA]
-        weights = [0.35, 0.15, 0.15, 0.15, 0.15, 0.025, 0.025]
-        chosen_bases = random.choices(possible_bases, weights=weights, k=1)[0]
-        info_bases.append("".join(chosen_bases))
+        possible_bases = [bases, 
+                          bases_CGA, bases_CGT, bases_GTA, bases_CTA, 
+                          bases_CG, bases_TA, bases_GT, bases_CA, bases_GA, bases_CT,
+                          bases_A, bases_T, bases_C, bases_G]
         
-        domain = "".join(random.choices(chosen_bases, k=domain_bnd[i+1] - domain_bnd[i]))
+        if domain_bnd[i+1] - domain_bnd[i] > 1890 :
+            cum_weights = [.25, 
+                           .45, .63, .77, .89, 
+                           .945, .968, .986, .992, .996, .998, 
+                           .9985, .999, .9995, 1]
+            palindromic = random.choices([True, False], weights=[10e-12, 1-10e-12], k=1)[0] 
+        if domain_bnd[i+1] - domain_bnd[i] > 210 : 
+            cum_weights = [.09, 
+                           .27, .42, .55, .72, 
+                           .80, .87, .90, .93, .96, .98, 
+                           .985, .990, .995, 1]
+            palindromic = random.choices([True, False], weights=[10e-8, 1-10e-8], k=1)[0]
+        elif domain_bnd[i+1] - domain_bnd[i] > 30 :
+            cum_weights = [.04, 
+                           .11, .19, .27, .35, 
+                           .53, .66, .74, .82, .90, .96, 
+                           .967, .974, 987 , 1]
+            palindromic = random.choices([True, False], weights=[.001, .999], k=1)[0]
+        elif domain_bnd[i+1] - domain_bnd[i] > 6 :
+            cum_weights = [.01, 
+                           .04, .07, .095, .12, 
+                           .40, .63, .71, .79, .87, .95, 
+                           .96, .97, .98, 1]
+            palindromic = random.choices([True, False], weights=[.1, .9], k=1)[0]
+        else :
+            cum_weights = [.0005, 
+                           .010, .015, .020, .025, 
+                           .125, .225, .285, .345, .405, .465, 
+                           .60, .72, .86, 1]
+            palindromic = random.choices([True, False], weights=[.25, .75], k=1)[0]
+        
+        r=0
+        while chosen_bases == _chosen_bases and r < 10 :
+            chosen_bases = random.choices(possible_bases, cum_weights=cum_weights, k=1)[0]
+            r += 1
+            
+        _chosen_bases = chosen_bases 
+        info_bases.append("".join(chosen_bases[0]))
+
+        seq = random.choices(chosen_bases[0], weights=chosen_bases[1], k=domain_bnd[i+1] - domain_bnd[i])
+        seq = "".join(seq)
+        if palindromic:
+            info_pal.append("".join(chosen_bases[0]))
+            mid_pos = len(seq) // 2
+            _mid_pos = mid_pos if len(seq) % 2 == 0 else mid_pos + 1
+            if random.randint(0,1) == 0:
+                seq = seq[:_mid_pos] + str(Seq(seq[:mid_pos]).reverse_complement())
+            else :
+                seq = seq[:_mid_pos] + seq[mid_pos-1:0:-1] + seq[0]
+        
+        domain = "".join(seq)
         genome += domain
     
     info_bases = "-".join(info_bases)
-    logging.info(f"Chosen bases per domain : {info_bases}")
+    if len(info_bases) < 1000 :
+        logging.info(f"Chosen bases per domain :\n{info_bases}")
+    else :
+        logging.info(f"Too many values ({len(info_bases)})...\n"
+                     f"Chosen bases per domain :\n{info_bases[:100]}\n...\n{info_bases[-100:]}")
+    
+    info_pal = "-".join(info_pal)
+    if len(info_pal) < 1000 :
+        logging.info(f"Chosen bases per palindromic domain :\n{info_pal}")
+    else :
+        logging.info(f"Too many palindroms ({len(info_pal)})...\n"
+                     f"Chosen bases per palindromic domain :\n{info_pal[:100]}\n...\n{info_pal[-100:]}")
 
     return genome
 
