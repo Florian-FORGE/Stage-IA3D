@@ -389,6 +389,7 @@ class Matrix():
         self._insulation_count = None
         self._insulation_correl = None
         self._PC1 = None
+        self._compartment = None
                 
     
     def get_count_insulation_score(self,
@@ -578,6 +579,109 @@ class Matrix():
             self._PC1 = self.get_PC1()
         return self._PC1
 
+
+    def get_compartmentalization(self, genome_path: str = None) -> list :
+        """
+        Method to compute the compartmentalization of the matrix using the 
+        PC1 values. The PC1 values are computed using the get_PC1() method.
+        
+        Parameters : 
+        genome_path (str) : the path to the reference genome to use for getting
+        the right phasing_track.
+
+        Returns :
+        a list containing the compartimentalization data as follows :
+        [...,"A", "A", ..., "U", "U", ..., "B", "B", ...] where A is  
+        the compartment A, B is the compartment B and U is the 
+        unclassified compartment. Those compartments are determined 
+        by the PC1 values, where 5 (4 for the start and end) consecutive 
+        positive values are needed to assign a position to compartment A, 
+        negative values are needed to assign a position to compartment B 
+        and all the positions surrounded by alternance of positive and 
+        negative values are assigned to the unclassified compartment U.
+        """
+        pc1 = self.get_PC1(genome_path=genome_path)
+        indic = [1 if val > 0 else -1 for val in pc1]
+
+        if indic[:3] == [1, 1, 1]:
+            compart = ["A"]
+        elif indic[:3] == [-1, -1, -1]:
+            compart = ["B"]
+        else:
+            compart = ["U"]
+        
+        for i in range(1, len(indic)-1):
+            if indic[i-1 : i+2] == [1, 1, 1] :
+                compart.append("A")
+            elif indic[i-1 : i+2] == [-1, -1, -1]:
+                compart.append("B")
+            else:
+                compart.append("U")
+        
+        if indic[-3:] == [1, 1, 1]:
+            compart += ["A"]
+        elif indic[-3:] == [-1, -1, -1]:
+            compart += ["B"]
+        else:
+            compart += ["U"]
+        
+        return compart
+
+    def get_compartmentalization_alt(self, genome_path: str = None) -> list :
+        """
+        Method to compute the compartmentalization of the matrix using the 
+        PC1 values. The PC1 values are computed using the get_PC1() method.
+        This method is an alternative to the get_compartmentalization().
+        
+        Parameters : 
+        genome_path (str) : the path to the reference genome to use for getting
+        the right phasing_track.
+
+        Returns :
+        a list containing the compartimentalization data as follows :
+        [...,"A", "A", ..., "U", "U", ..., "B", "B", ...] where A is  
+        the compartment A, B is the compartment B and U is the 
+        unclassified compartment. Those compartments are determined 
+        by the PC1 values, where 5 (4 for the start and end) consecutive 
+        positive values are needed to assign a position to compartment A, 
+        negative values are needed to assign a position to compartment B 
+        and all the positions surrounded by alternance of positive and 
+        negative values are assigned to the unclassified compartment U.
+        """
+        pc1 = self.get_PC1(genome_path=genome_path)
+        indic = [1 if val > 0 else -1 for val in pc1]
+        compartments = []
+        run_length = 1
+        current_sign = indic[0]
+
+        for i in range(1, len(indic)):
+            if indic[i] == current_sign:
+                run_length += 1
+            else:
+                if run_length >= 4:
+                    label = "A" if current_sign > 0 else "B"
+                else:
+                    label = "U"
+                compartments.extend([label] * run_length)
+                current_sign = indic[i]
+                run_length = 1
+
+        # Handle the last run
+        if run_length >= 4:
+            label = "A" if current_sign > 0 else "B"
+        else:
+            label = "U"
+        compartments.extend([label] * run_length)
+
+        return compartments
+
+
+    @property
+    def compartments(self):
+        if self._compartment is None:
+            self._compartment = self.get_compartmentalization_alt()
+        return self._compartment
+
     @property 
     def scores(self):
         return {"insulation_count" : self.insulation_count, "insulation_correl" : self.insulation_correl, "PC1" : self.PC1}
@@ -616,7 +720,67 @@ class Matrix():
         else :
             logging.info("There is no information about mutations in this Matrix object.")
             return None
+    
+    def hist_mutations(self, 
+                       gs: GridSpec = None,
+                       f: figure.Figure = None,
+                       i: int = 0, 
+                       j: int = 0,
+                       title: str = None, 
+                       color: str = "#9900A7"):
+        """
+        Method to compute the histogram of the mutations in the matrix.
         
+        Reurns
+        ----------
+        gs : GridSpec
+            the grid layout to place subplots within a figure.
+        f : figure.Figure
+            the object that holds all plot elements.
+        i : int
+            the line in which the histogram should be plotted.
+        j : int
+            the column in which the histogram should be plotted.
+
+        Reurns
+        ----------
+        the axis of the histogram plot.
+        """
+        gs = GridSpec(nrows=1, ncols=1) if gs is None else gs
+        f = plt.figure(clear=True, figsize=(15, 10)) if f is None else f
+        
+        f_p_val, _, _ = self.formatting()
+        
+        l=None
+        if self.list_mutations is not None :
+            mut_pos = [num for start, stop in self.list_mutations for num in range(start, stop + 1)]
+            l = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+
+        bins = self._obs_o_exp.shape[0] if self._obs_o_exp is not None else None
+
+        ticks = [i for i in range(0, bins+1, bins//(len(f_p_val)-1))]
+        
+        ax = f.add_subplot(gs[i, j])
+        
+        if (l is not None) and (bins is not None) :
+            ax.hist(l, bins=bins, orientation="horizontal", density=False, alpha=.7, color=color, edgecolor="black", linewidth=.01)
+            ax.set_xlabel("Number of Mutations", fontsize=18)
+            ax.set_ylabel("")
+            ax.set_ylim(0, 249)
+            ax.set_yticks(ticks=ticks, labels=f_p_val)
+            ax.tick_params(axis='x', labelsize=18)
+            ax.invert_yaxis()
+            ax.set_title(f"{title}", fontsize=22)
+            
+            return ax
+        
+        else :
+            logging.info("There is no information about mutations in this Matrix object...histogram " \
+                         "of mutations is not computable.")
+            ax.axis('off')
+            return None
+            
+
     @property
     def distance_mutation(self):
         l = self.list_mutations
@@ -665,8 +829,8 @@ class Matrix():
         return f_p_val, titles, cmap
        
     def heatmap(self,
-                gs: GridSpec,
-                f: figure.Figure,
+                gs: GridSpec = None,
+                f: figure.Figure = None,
                 i: int = 0, 
                 j: int = 0,
                 vmin: float = None, 
@@ -705,6 +869,9 @@ class Matrix():
          ----------
          Produces the heatmap associated to the count matrix of Matrix object.
         """
+        gs = GridSpec(nrows=1, ncols=1) if gs is None else gs
+        f = plt.figure(clear=True, figsize=(20, 20)) if f is None else f
+        
         if not vmin and not vmax :
             vmin, vmax = self.get_extremum_heatmap()
 
@@ -722,8 +889,8 @@ class Matrix():
                   vmin=vmin, 
                   vmax=vmax)
 
-        ax.set_title(f"{titles[0]}  -   Chrom : {titles[1]}, Start : {titles[2]}, "
-                     f"End : {titles[3]}, Resolution : {titles[4]}  -   {titles[5]}",
+        ax.set_title(f"{titles[0]}\nChrom : {titles[1]}, Start : {titles[2]},\n"
+                     f"End : {titles[3]}, Resolution : {titles[4]} - {titles[5]}",
                      fontsize=14 
                      )
         
@@ -973,8 +1140,8 @@ class Matrix():
         return f"{self.__class__.__name__}_{self.gtype}"
 
     def _score_plot(self,
-                    gs: GridSpec,
-                    f: figure.Figure, 
+                    gs: GridSpec = None,
+                    f: figure.Figure = None, 
                     title: str =None,
                     score_type: str = "insulation_count", 
                     i: int = 0, 
@@ -996,6 +1163,9 @@ class Matrix():
         - j : int
             the column in which the heatmap should be plotted.
          """
+        gs = GridSpec(nrows=1, ncols=1) if gs is None else gs
+        f = plt.figure(clear=True, figsize=(15, 10)) if f is None else f
+        
         f_p_val, _, _ = self.formatting()
         
         ax = f.add_subplot(gs[i, j])
@@ -1556,7 +1726,8 @@ def join_triangular_matrices(mat1: np.ndarray, mat2: np.ndarray):
     return new_mat
 
 
-def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, i: int = 0, j: int = 0, saddle: bool = False):
+def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, 
+                          i: int = 0, j: int = 0, saddle: bool = False, compartment: bool = False):
     """
     """
     f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
@@ -1584,8 +1755,8 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
               vmin=vmin, 
               vmax=vmax)
     
-    if mutation :
-        color1, color2, alpha = ('orange', 'orange', .75) if comp_type == "substract" else ('green', 'green', .5)
+    if mutation or compartment:
+        color1, color2, alpha = ('yellow', 'yellow', .75) if comp_type == "substract" else ('purple', 'purple', .5)
         hyp_mut_pos = False
 
         sort_mut_pos1, sort_mut_pos2 = None, None
@@ -1601,6 +1772,15 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
             mut_pos2 = [bin_idx for bin_idx in mut_pos2 if 0<=bin_idx<=249]
             sort_mut_pos2 = [sorted_indices2.index(bin_idx) for bin_idx in mut_pos2] if saddle else mut_pos2
         
+        if compartment :
+            color_A, color_B, alpha_A, alpha_B = ("#377C5F", "#C4A23E", .5, .95)
+        
+            comp_pos1 = mat1.compartments
+            sort_comp_pos1 = [comp_pos1[i] for i in sorted_indices1] if saddle else comp_pos1
+
+            comp_pos2 = mat2.compartments
+            sort_comp_pos2 = [comp_pos2[i] for i in sorted_indices2] if saddle else comp_pos2
+        
         if saddle and (sort_mut_pos1 is None or sort_mut_pos2 is None) and comp_type == "triangular" :
             sort_mut_pos1 = [sorted_indices1.index(bin_idx) for bin_idx in mut_pos2] \
                                                             if sort_mut_pos1 is None \
@@ -1611,7 +1791,7 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
                                                             if sort_mut_pos2 is None \
                                                             and sort_mut_pos1 is not None \
                                                             else sort_mut_pos2
-            color1, color2 = ('#16BE00', '#0E330A')
+            color1, color2 = ("#9900A7", "#3B0B47")
             hyp_mut_pos = True
         else:
             sort_mut_pos1 = sort_mut_pos2 if sort_mut_pos1 is None else sort_mut_pos1
@@ -1621,17 +1801,58 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
             raise ValueError(f"None of the matrices ({mat1.gtype}, {mat2.gtype}) have "
                               "mutation related data...Exiting.")
         
-        h, hyp = None, None
-        for bin_idx1, bin_idx2 in zip(sort_mut_pos1, sort_mut_pos2) :
-            # Highlight the mutated bins
-            h = ax.axvspan(bin_idx2 - 0.5, bin_idx2 + 0.5, ymax=.01, color=color1, alpha=alpha, label="Mutation")
-            ax.axhspan(bin_idx2 - 0.5, bin_idx2 + 0.5, xmax=.01, color=color1, alpha=alpha)
-            if hyp_mut_pos :
-                hyp = ax.axvspan(bin_idx1 - 0.5, bin_idx1 + 0.5, ymin=.99, color=color2, alpha=alpha, label="Hyp_mut_pos")
-            else :
-                ax.axvspan(bin_idx1 - 0.5, bin_idx1 + 0.5, ymin=.99, color=color2, alpha=alpha)
-            ax.axhspan(bin_idx1 - 0.5, bin_idx1 + 0.5, xmin=.99, color=color2, alpha=alpha)
+        h, hyp, c_a, c_b = None, None, None, None
+        if mutation :
+            for bin_idx1, bin_idx2 in zip(sort_mut_pos1, sort_mut_pos2) :
+                # Highlight the mutated bins
+                h = ax.axvspan(bin_idx2 - 0.5, bin_idx2 + 0.5, ymax=.01, color=color1, alpha=alpha, label="Mutation")
+                ax.axhspan(bin_idx2 - 0.5, bin_idx2 + 0.5, xmax=.01, color=color1, alpha=alpha)
+                if hyp_mut_pos :
+                    hyp = ax.axvspan(bin_idx1 - 0.5, bin_idx1 + 0.5, ymin=.99, color=color2, alpha=alpha, label="Hyp_mut")
+                else :
+                    ax.axvspan(bin_idx1 - 0.5, bin_idx1 + 0.5, ymin=.99, color=color2, alpha=alpha)
+                ax.axhspan(bin_idx1 - 0.5, bin_idx1 + 0.5, xmin=.99, color=color2, alpha=alpha)
+        
+        if compartment and saddle :
+            i=0
+            for comp_bin1, comp_bin2 in zip(sort_comp_pos1, sort_comp_pos2) :
+                # Highlight the compartment A and B per bin
+                if comp_bin2 == "A" :
+                    color2, alpha2 = (color_A, alpha_A) 
+                    c_a = ax.axvspan(i - 0.5, i + 0.5, ymax=.005, color=color2, alpha=alpha2, label="Comp A")
+                    ax.axhspan(i - 0.5, i + 0.5, xmax=.005, color=color2, alpha=alpha2)
+                elif comp_bin2 == "B" :
+                    color2, alpha2 = (color_B, alpha_B)
+                    c_b = ax.axvspan(i - 0.5, i + 0.5, ymax=.005, color=color2, alpha=alpha2, label="Comp B")
+                    ax.axhspan(i - 0.5, i + 0.5, xmax=.005, color=color2, alpha=alpha2)
+                
+                if comp_bin1 == "A" :
+                    color1, alpha1 = (color_A, alpha_A)
+                    ax.axvspan(i - 0.5, i + 0.5, ymin=.995, color=color1, alpha=alpha1)
+                    ax.axhspan(i - 0.5, i + 0.5, xmin=.995, color=color1, alpha=alpha1)
+                elif comp_bin2 == "B" :
+                    color1, alpha1 = (color_B, alpha_B)
+                    ax.axvspan(i - 0.5, i + 0.5, ymin=.995, color=color1, alpha=alpha1)
+                    ax.axhspan(i - 0.5, i + 0.5, xmin=.995, color=color1, alpha=alpha1)
 
+                i += 1
+        
+        elif compartment :
+            indices1 = [i for i in range(1, len(comp_pos1)) if comp_pos1[i] != comp_pos1[i-1]]
+            indices2 = [i for i in range(1, len(comp_pos2)) if comp_pos2[i] != comp_pos2[i-1]]
+            n1 = len(comp_pos1) - 1
+            n2 = len(comp_pos2) - 1
+            
+            if (len(indices1) <= 30) and (mat1.resolution in ["8Mb", "16Mb", "32Mb"]) :
+                for ind1 in indices1 :
+                    ax.plot([ind1, n1], [ind1, ind1], '--k', lw=2)
+                    ax.plot([ind1, ind1], [0, ind1], '--k', lw=2)
+            if (len(indices2) <= 30) and (mat2.resolution in ["8Mb", "16Mb", "32Mb"]) :
+                for ind2 in indices2 : 
+                    ax.plot([0, ind2], [ind2, ind2], '-.', color="gray", lw=2)
+                    ax.plot([ind2, ind2], [ind2, n2], '-.', color="gray", lw=2)
+
+    
     ax.set_title(f"{titles[0]}\nChrom : {titles[1]}, Start : {titles[2]}, "
                     f"End : {titles[3]}, Resolution : {titles[4]}\n", 
                     fontsize=22
@@ -1643,9 +1864,11 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
     ax.set_xticks(ticks=ticks, labels=f_p_val)
     ax.tick_params(axis='both', labelsize=22)
     format_ticks(ax, x=False, y=False)
-    if mutation :
+    if mutation or compartment:
         handles = [h] if h else [] 
         handles += [hyp] if hyp else []
+        handles += [c_a] if c_a else []
+        handles += [c_b] if c_b else []
         legend = ax.legend(handles=handles, loc='best', bbox_to_anchor=(0.98, 0.98)) \
                                             if (sort_mut_pos1 != [] and sort_mut_pos2 != []) else None
         if legend is not None:
@@ -1653,11 +1876,12 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
             for text in legend.get_texts():
                 text.set_fontsize(20)
     if comp_type == "triangular" :
-        ax.text(.97, .9, f"{mat1.genome}",
+        space = .05 + .025 * len(handles) if (mutation or compartment) else .05
+        ax.text(.97, 1-space, f"{mat1.genome}",
                 transform=ax.transAxes, fontsize=22,
                 verticalalignment='top', horizontalalignment='right',
                 bbox=dict(boxstyle="round", facecolor="white"))
-        ax.text(.03, .1, f"{mat2.genome}",
+        ax.text(.03, space, f"{mat2.genome}",
                 transform=ax.transAxes, fontsize=22,
                 verticalalignment='bottom', horizontalalignment='left',
                 bbox=dict(boxstyle="round", facecolor="white"))
@@ -2679,7 +2903,7 @@ class CompareMatrices():
         gs = GridSpec(nrows=len(resolutions), ncols=1) if gs is None else gs
         f = plt.figure(clear=True, figsize=fig_dim) if f is None else f
 
-        # Trying to better visualize differences by dividing the values by the reference
+        # Trying to better visualize differences by dividing the values by the reference (not conclusive)
         # df["std_values"] = abs(df["values"] / df["reference"])
 
         for k, resol in enumerate(resolutions) :
@@ -2704,6 +2928,7 @@ class CompareMatrices():
                                                         "insulation_correl"], 
                             mutation: bool = False, 
                             saddle: bool = False, 
+                            compartment: bool = False, 
                             outputfile: str = None, 
                             show: bool = False, 
                             gs: GridSpec = None, 
@@ -2731,7 +2956,7 @@ class CompareMatrices():
 
         # Heatmap
         heatmap_matrices_comp(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, 
-                              gs=gs, f=f, i=i, j=j, saddle=saddle)
+                              gs=gs, f=f, i=i, j=j, saddle=saddle, compartment=compartment)
 
         # Scores
         f_p_val = mat1.formatting()[0]

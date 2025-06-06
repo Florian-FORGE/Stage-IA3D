@@ -57,7 +57,7 @@ def rdm_genome_alt(length: int):
 
     random.seed(23)  # For reproducibility
     domain_bnd = [0] + random.sample(range(250, length-250), k=random.randint(1, length//1000)) + [length]
-    # domain_bnd = [0] + random.sample(range(25, length-25), k=random.randint(1, length//10)) + [length]
+    # domain_bnd = [0] + random.sample(range(25, length-25), k=random.randint(1, length//100)) + [length]
     domain_bnd.sort()
     if len(domain_bnd) < 1000 :
         logging.info(f"Randomly chosen domain boundaries :\n{domain_bnd }")

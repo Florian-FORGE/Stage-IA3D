@@ -111,12 +111,12 @@ def read_mutations_from_tsv(mutationfile,
         intervals.append(mutation)
     return intervals
 
-def generate_random_mutations_old(mutations: List[Mutation], 
-                                  genome: str, 
-                                  rdm_seed: int = None, 
-                                  boundaries: dict = None, 
-                                  extend_to: int = None,
-                                  forbid_pos: dict = None) -> List[Mutation]:
+def generate_random_pos_mutations_old(mutations: List[Mutation], 
+                                      genome: str, 
+                                      rdm_seed: int = None, 
+                                      boundaries: dict = None, 
+                                      extend_to: int = None,
+                                      forbid_pos: dict = None) -> List[Mutation]:
     """
     Generate random list of Mutations having the same kind of mutations as the 
     ones specified in mutation or bed file. The length and type of the mutation  
@@ -204,13 +204,13 @@ def generate_random_mutations_old(mutations: List[Mutation],
     
     return rdm_mutations
 
-def generate_random_mutations(mutations: List[Mutation], 
-                              genome: str, 
-                              chromsize: int = None, 
-                              rdm_seed: int = None,
-                              muttype: str = "shuffle",
-                              sequence: str = None
-                              ) -> List[Mutation] :
+def generate_random_pos_mutations(mutations: List[Mutation], 
+                                  genome: str, 
+                                  chromsize: int = None, 
+                                  rdm_seed: int = None,
+                                  muttype: str = "shuffle",
+                                  sequence: str = None
+                                  ) -> List[Mutation] :
     """
     Generate random list of Mutations having the same kind of mutations as the 
     ones specified in mutation or bed file. The length and type of the mutation  
@@ -254,7 +254,46 @@ def generate_random_mutations(mutations: List[Mutation],
     return intervals
 
 
-def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0) :
+def generate_random_mutations(mutations: List[Mutation], 
+                              rdm_seed: int = None,
+                              sequence: str = None
+                              ) -> List[Mutation] :
+    """
+    Generate random list of Mutations having the same start and end positions as the 
+    ones specified in mutation or bed file. The length and position of the mutation  
+    are preserved but a random sequence is introduced in place of the mutation. 
+
+    Parameters
+    ----------
+    - mutations : list
+        A list of Mutation objects
+    
+    Returns
+    ----------
+    A list of Mutation objects with the same type and position of mutated sequences 
+    as in the input list but with random sequences introduced in place of the mutation.
+    """
+    rdm_mutations = []
+    _sequence = sequence if sequence else None
+    for i, mut in enumerate(mutations) :
+        if rdm_seed:
+            rdm.seed(1/(rdm_seed+i**2))
+        
+        sequence = "".join(rdm.choices(["A", "T", "C", "G"], 
+                                       weights=[.22, .22, .28, .28], 
+                                       k=mut.end - mut.start)) \
+                            if _sequence is None else sequence
+        
+        name = f"rdm_{mut.name}" if mut.name else f"rdm_{mut.chrom}_{mut.start}_{mut.end}"
+
+        rdm_mut = Mutation(mut.chrom, mut.start, mut.end, name, mut.strand, "insertion", sequence)
+
+        rdm_mutations.append(rdm_mut)
+    
+    return rdm_mutations
+
+
+def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0, rdm_pos: bool = True) :
     
     if bed:
         mutations = read_mutations_from_BED(bed, mutationtype)
@@ -266,7 +305,10 @@ def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int
     mutators = {"Wtd_mut" : Mutator(fasta_handle, mutations)}
     for i in range(nb_random):
         rdm_seed = (3+i)**3
-        random_mutations = generate_random_mutations(mutations=mutations, genome=genome, rdm_seed=rdm_seed, muttype=mutationtype)
+        if rdm_pos:
+            random_mutations = generate_random_pos_mutations(mutations=mutations, genome=genome, rdm_seed=rdm_seed, muttype=mutationtype)
+        else :
+            random_mutations = generate_random_mutations(mutations=mutations, rdm_seed=rdm_seed)
         mutators[f"Rdm_mut_{i}"] = Mutator(fasta_handle, random_mutations)
     
     for name, mutator in mutators.items() :
@@ -305,6 +347,9 @@ def parse_arguments():
                         help='the mutation file, see documentation for the format')
     parser.add_argument("--mutationtype",
                         required=False, help="Specify the type of mutation to perform (only allowed if --bed is set), default='shuffle'")
+    parser.add_argument("--rdm_pos",
+                        required=False, 
+                        help="Weither the mutations will be generated at random positions in the genome, or at the same positions as in the input file bu putting random sequences in place of this mutations.")
     
     args = parser.parse_args()
 
@@ -316,13 +361,17 @@ def parse_arguments():
 
 if __name__ == '__main__':
     args = parse_arguments()
+
+    rdm_pos  = bool(args.rdm_pos.lower() == "true") if args.rdm_pos is not None else False
+
     main(mutationfile=args.mutationfile, 
          bed=args.bed, 
          genome=args.genome, 
          path=args.path, 
          mutationtype=args.mutationtype,
          nb_random=int(args.nb_rdm),
-         extend_to=int(args.extend_to))
+         extend_to=int(args.extend_to), 
+         rdm_pos=rdm_pos)
     
     logging.basicConfig(filename=f"{args.path}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')

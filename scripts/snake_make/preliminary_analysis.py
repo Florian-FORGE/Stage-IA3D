@@ -137,6 +137,11 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
             mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f, show_legend=True, compartment=show_compartments)
             log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f, show_legend=True, compartment={show_compartments})\n"
 
+            mat_comparisons.ref.di[resol].hist_mutations(gs=gs, f=f, j=1)
+            mat_comparisons.comp_dict["orcarun_Wtd_mut"].di[resol].hist_mutations(gs=gs, f=f, j=1, title=f"Mutation repartition\n")
+            log_info += f"mat_comparisons.ref.di[{resol}].hist_mutations(gs=gs, f=f, j=1)\n"
+            log_info += f"mat_comparisons.comp_dict['orcarun_Wtd_mut'].di[{resol}].hist_mutations(gs=gs, f=f, j=1, title='Mutation repartition')\n"
+            
             mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2, compartment=show_compartments)
             log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2, compartment={show_compartments})\n"
 
@@ -252,7 +257,7 @@ if __name__ == '__main__':
     # l_comp_types = args.l_comp_types.split(",") #used for analysis_plot
     l_resol = args.l_resol.split(",") if args.l_resol is not None else None
     show_rdm = bool(args.show_rdm.lower() == "true") if args.show_rdm is not None else False
-    show_compartments = bool(args.show_rdm.lower() == "true") if args.show_rdm is not None else False
+    show_compartments = bool(args.show_compartments.lower() == "true") if args.show_compartments is not None else False
    
     analysis_slide(prediction_log_path=args.prediction_log_path, 
                   analysis_path=args.analysis_path, 
