@@ -81,7 +81,9 @@ def analysis_plot(prediction_log_path: str, analysis_path:str, l_score_types: li
 
 
 
-def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: list, merged_by:str = None, l_resol: list = None, show_rdm: bool = False):
+def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: list, 
+                   merged_by:str = None, l_resol: list = None, show_rdm: bool = False, 
+                   show_compartments: bool = False):
     """
     """
     if not os.path.exists(analysis_path):
@@ -132,11 +134,11 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
             
             log_info += f"To produce the plots in plots_{resol}.pdf the following method and arguments were used :\n"
 
-            mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f, show_legend=True)
-            log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f, show_legend=True)\n"
+            mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f, show_legend=True, compartment=show_compartments)
+            log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f, show_legend=True, compartment={show_compartments})\n"
 
-            mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2)
-            log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2)\n"
+            mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=2, compartment=show_compartments)
+            log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=2, compartment={show_compartments})\n"
 
             ax = f.add_subplot(gs[1:nb_scores+1, 2])
             mat_comparisons.dispersion_plot(merged_by=merged_by, l_resol=[resol], gs=gs, f=f, ax=ax)
@@ -154,11 +156,11 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
             else :
                 rdm = rd.randint(0, len(mat_comparisons.comp_dict)-2)
                 
-                mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{rdm}"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, gs=gs, f=f, j=4)
-                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='triangular', l_score_types=[], mutation=True, gs=gs, f=f, j=2)\n"
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{rdm}"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, gs=gs, f=f, j=4, compartment=show_compartments)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='triangular', l_score_types=[], mutation=True, gs=gs, f=f, j=2, compartment={show_compartments})\n"
 
-                mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{rdm}"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=6)
-                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=6)\n"
+                mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{rdm}"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, j=6, compartment=show_compartments)
+                log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Rdm_mut_{rdm}'], resol={resol}, comp_type='substract', l_score_types=[], mutation=True, gs=gs, f=f, j=6, compartment={show_compartments})\n"
 
                 ax = f.add_subplot(gs[1:nb_scores+1, 6])
                 mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=True, score_type = "insulation_count", gs=gs, f=f, ax=ax)
@@ -174,20 +176,20 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
             
             with PdfPages(saddle_path, keep_empty=False) as pdf:
                 if not show_rdm:
-                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol="32Mb", comp_type="triangular", l_score_types=[], mutation=True, saddle=True)
+                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, saddle=True, compartment=show_compartments)
                     pdf.savefig()
-                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol="32Mb", comp_type="substract", l_score_types=[], mutation=True, saddle=True)
+                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, saddle=True, compartment=show_compartments)
                     pdf.savefig()
                 else :
                     range_rdm = range(0, len(mat_comparisons.comp_dict)-2)
                     gs = GridSpec(nrows=2, ncols=len(range_rdm)+1)
                     f = plt.figure(clear=True, figsize=(20*(len(range_rdm)+1), 33.75))
 
-                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol="32Mb", comp_type="triangular", l_score_types=[], mutation=True, saddle=True, gs=gs, f=f, i=0,j=0)
-                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol="32Mb", comp_type="substract", l_score_types=[], mutation=True, saddle=True, gs=gs, f=f, i=1,j=0)
+                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, saddle=True, gs=gs, f=f, i=0, j=0, compartment=show_compartments)
+                    mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, saddle=True, gs=gs, f=f, i=1, j=0, compartment=show_compartments)
                     for j in range_rdm:
-                        mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{j}"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, gs=gs, f=f, i=0, j=j+1)
-                        mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{j}"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, i=1, j=j+1)
+                        mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{j}"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, gs=gs, f=f, i=0, j=j+1, compartment=show_compartments)
+                        mat_comparisons.plot_2_matices_comp(_2_run=["ref", f"orcarun_Rdm_mut_{j}"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, gs=gs, f=f, i=1, j=j+1, compartment=show_compartments)
                     pdf.savefig()
                 
                 pdf.close()
@@ -235,6 +237,8 @@ def parse_arguments():
                                                         "automatically be selected.")
     parser.add_argument("--show_rdm", 
                         required=False, help="Whether to show the heatmaps for one random prediction from the randomly mutated experiments.")
+    parser.add_argument("--show_compartments",
+                        required=False, help="Whether to show the compartments in the plots. If not specified, it will be set to False.")
     
     args = parser.parse_args()
 
@@ -248,12 +252,14 @@ if __name__ == '__main__':
     # l_comp_types = args.l_comp_types.split(",") #used for analysis_plot
     l_resol = args.l_resol.split(",") if args.l_resol is not None else None
     show_rdm = bool(args.show_rdm.lower() == "true") if args.show_rdm is not None else False
+    show_compartments = bool(args.show_rdm.lower() == "true") if args.show_rdm is not None else False
    
     analysis_slide(prediction_log_path=args.prediction_log_path, 
                   analysis_path=args.analysis_path, 
                   l_score_types=l_score_types, 
                   merged_by=args.merged_by,
                   l_resol=l_resol,
-                  show_rdm=show_rdm)
+                  show_rdm=show_rdm,
+                  show_compartments=show_compartments)
    
 
