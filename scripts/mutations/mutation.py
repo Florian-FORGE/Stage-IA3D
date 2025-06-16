@@ -16,6 +16,8 @@ import pandas as pd
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
+from config_mut import config_data
+
 """
 In silico mutation of a sequence specified by a vcf-like file
 
@@ -53,6 +55,7 @@ class Mutation():
         self.strand = strand
         self.ref = None
         self.alt = None
+        self.ref_bins = None
         self.bin_order = None
         self.op = operation
         if operation == "insertion":
@@ -121,7 +124,7 @@ class Mutator():
 
     """
     # Class-level constant
-    silenced = True
+    silenced = config_data["silenced"]
     
     def __init__(self, fasta_handle, mutations: List[Mutation], maximumCached : int = 4):
         self.handle = fasta_handle
@@ -182,7 +185,7 @@ class Mutator():
         mutation.alt = str(Seq(subseq).reverse_complement())
 
 
-    def insert(self, mutation, silenced: bool = None):
+    def insert(self, mutation: Mutation, silenced: bool = None):
         subseq = self.get_ref(mutation)
         mutation.ref = subseq
         if mutation.strand == "+":
@@ -202,15 +205,21 @@ class Mutator():
         mutation.alt = sequence
 
 
-    def bin_shuffle(self, mutation: Mutation, binsize: int = 128_000):
+    def permutations_inter(self, mutation: Mutation, binsize: int = None):
+        """
+        Interval will be shuffled by bins of a given size. 
+        The binsize is specified in the config_mut.py file"""
+        binsize = config_data["binsize"] if binsize is None else binsize
         subseq = self.get_ref(mutation)
         if (len(subseq) < binsize) or (len(subseq)%binsize != 0) :
             raise ValueError(f"The range of the mutation ({len(subseq)}) and the "
                              f"binsize ({binsize}) are not compatible")
         
         mutation.ref = subseq
-        
+
         bins = [f"-{i}-" + subseq[i*binsize : (i+1)*binsize] for i in range((len(subseq)//binsize))]
+        mutation.ref_bins = ''.join(bins)
+        
         interm = ''.join(random.sample(bins, len(bins)))
         split_interm = interm.split("-")
         bin_order = [split_interm[i] for i in range(len(split_interm)) if split_interm[i].isdigit()]
@@ -218,6 +227,30 @@ class Mutator():
         
         mutation.alt = ''.join(new_order_seq)
         mutation.bin_order = ':'.join(bin_order)
+    
+    def permutations_intra(self, mutations: List[Mutation]) :
+        """
+        """ 
+        l_chrom = set([mutation.chrom for mutation in mutations])
+        for chrom in l_chrom:
+            chrom_mutations = [mutation for mutation in mutations if mutation.chrom == chrom]
+            if len(chrom_mutations) == 0:
+                continue
+            
+            self.chromosome_mutations[chrom] += 1
+
+            random.seed(config_data["seed"])
+            seq_order = random.sample(range(len(chrom_mutations)), k=len(chrom_mutations))
+            
+            len_i, len_new = 0, 0
+            for i, new in enumerate(seq_order) :
+                mutation = chrom_mutations[i]
+                mutation.ref = self.get_ref(mutation)
+                len_i += len(mutation.ref)
+                mutation.alt = self.get_ref(chrom_mutations[new])
+                len_new += len(mutation.alt)
+                mutation.bin_order = f"{new} -> {i}"
+
 
 
     def mutate(self):
@@ -225,21 +258,33 @@ class Mutator():
         Mutate the sequence for each interval according to the mutation type
         and returns the set of mutated chromosomes as biopython SeqRecords.
         """
-        for mutation in self.mutations:
-            self.chromosome_mutations[mutation.chrom] += 1
-            if mutation.op == "shuffle":
-                self.shuffle(mutation)
-            elif mutation.op == "mask":
-                self.mask(mutation)
-            elif mutation.op == "inversion":
-                self.invert(mutation)
-            elif mutation.op == "insertion":
-                self.insert(mutation)
-            elif mutation.op == "bin_shuffle":
-                self.bin_shuffle(mutation)
-            else:
-                self.chromosome_mutations[mutation.chrom] -= 1
-                raise ValueError("%s is not a valid operation" % mutation.op)
+        if all(mutation.op == "permutations_intra" for mutation in self.mutations) :
+            # If all mutations are permutations_intra, we shuffle the specified bins of each chromosome
+            self.permutations_intra(self.mutations)
+
+        else :
+            mutations = self.mutations
+            if any(mutation.op == "permutations_intra" for mutation in self.mutations) :
+                mutations_intra = [mutation for mutation in self.mutations if mutation.op == "permutations_intra"]
+                mutations = [mutation for mutation in self.mutations if mutation.op != "permutations_intra"]
+
+                self.permutations_intra(mutations_intra)
+
+            for mutation in mutations:
+                self.chromosome_mutations[mutation.chrom] += 1
+                if mutation.op == "shuffle":
+                    self.shuffle(mutation)
+                elif mutation.op == "mask":
+                    self.mask(mutation)
+                elif mutation.op == "inversion":
+                    self.invert(mutation)
+                elif mutation.op == "insertion":
+                    self.insert(mutation)
+                elif mutation.op == "permutations_inter":
+                    self.permutations_inter(mutation)
+                else:
+                    self.chromosome_mutations[mutation.chrom] -= 1
+                    raise ValueError("%s is not a valid operation" % mutation.op)
 
     def get_mutated_chromosome_sequence(self, chrom):
         chrom_intervals = [interval for interval in self.mutations if interval.chrom == chrom]
@@ -321,8 +366,11 @@ class Mutator():
         data = []
         for mutation in self.mutations:
             trace = mutation.trace()
-            if mutation.op == "bin_shuffle" :
+            if mutation.op == "permutations_inter" :
+                trace["ref_seq"] = mutation.ref_bins
                 trace["bin_order"] = mutation.bin_order
+            elif mutation.op == "permutations_intra" :
+                trace["seq_order"] = mutation.bin_order
             data.append(trace)
         return pd.DataFrame(data)
 

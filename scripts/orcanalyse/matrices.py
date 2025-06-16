@@ -10,7 +10,7 @@ import numpy as np
 
 import pandas as pd
 import os
-from typing import Dict, Union, NamedTuple, List, Any
+from typing import Dict, Union, NamedTuple, List, Any, Optional
 from collections import ChainMap
 
 from matplotlib import figure, axes
@@ -29,6 +29,11 @@ logging.basicConfig(
     level=logging.INFO,  # Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+import subprocess
+import tempfile
+import gzip
+import shutil
 
 from config import config_data
 
@@ -389,9 +394,16 @@ class Matrix():
         self._insulation_count = None
         self._insulation_correl = None
         self._PC1 = None
+        self._IF = None
         self._compartment = None
                 
-    
+    @property
+    def binsize(self) -> int :
+        _, start, end = self.region
+        binsize = (end - start)//len(self.obs_o_exp)
+        return binsize
+
+
     def get_count_insulation_score(self,
                               w: int = 5
                               ) -> list :
@@ -561,7 +573,8 @@ class Matrix():
         the right phasing_track.
         """
         if self._PC1 is None :
-            A = replace_nan_with_neighbors_mean(self.obs)
+            m = get_property(self, self.which_matrix("PC1"))
+            A = replace_nan_with_neighbors_mean(m)
 
             phasing_track = self.get_phasing_track(genome_path=genome_path)["GC"].values
                         
@@ -579,6 +592,155 @@ class Matrix():
             self._PC1 = self.get_PC1()
         return self._PC1
 
+
+    def get_adjusted_interaction_frequencies(self, fdr_threshold: float = None) -> list :
+        """
+        Runs FItHiC2 on the observed contact matrix and returns the adjusted interaction
+        frequencies (AIF) for each bin, using the statistically significant interactions 
+        per bin.
+
+        Parameters:
+            fdr_threshold (float): FDR threshold for significance.
+
+        Returns:
+            List[int]: Number of significant interactions per bin.
+        """
+        obs = get_property(self, self.which_matrix("aif"))  # shape: (250, 250)
+        bias = np.mean(obs, axis=0)
+        obs /= np.outer(bias, bias)
+
+        binsize = self.binsize
+        n_bins = obs.shape[0]
+        chrom = self.region[0]
+        fdr_threshold = config_data["AIF_PARAMS"]["fdr_threshold"] if fdr_threshold is None else fdr_threshold
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+        # tmpdir = "./tmp"
+        # os.makedirs(tmpdir, exist_ok=True)
+
+            bias_path = os.path.join(tmpdir, "bias.txt.gz")
+
+            with open(bias_path, "w") as f:
+                for i, val in enumerate(bias):
+                    start = i * binsize
+                    end = start + binsize - 1
+                    f.write(f"{chrom}\t{(start + end)//2}\t{val}\n")
+            with open(bias_path, 'rb') as f_in, gzip.open(bias_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+            # 1. Write FItHiC input
+            input_path = os.path.join(tmpdir, "fithic_input.txt")
+
+            with open(input_path, "w") as f:
+                for i in range(n_bins):
+                    for j in range(i, n_bins):
+                        count = obs[i, j]
+                        # if i==0 :
+                        #     print(count)
+                        if count > 0:
+                            start1 = i * binsize
+                            end1 = start1 + binsize - 1
+                            start2 = j * binsize
+                            end2 = start2 + binsize - 1
+                            f.write(f"{chrom}\t{(start1 + end1)//2}\t{chrom}\t{(start2 + end2)//2}\t{int(count)}\n")
+
+            # 2. Write bins BED file
+            bins_bed = os.path.join(tmpdir, "bins.bed")
+
+            with open(bins_bed, "w") as f:
+                for i in range(n_bins):
+                    start = i * binsize
+                    end = start + binsize
+                    f.write(f"{chrom}\t{start}\t{end}\t{i}\n")
+            
+            # 3. Compress the bins BED file and FItHiC input file
+            bins_bed_gz = bins_bed + ".gz"
+            with open(bins_bed, 'rb') as f_in, gzip.open(bins_bed_gz, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            
+            input_path_gz = input_path + '.gz'
+            with open(input_path, 'rb') as f_in, gzip.open(input_path_gz, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+            # 4. Run FItHiC
+            output_dir = os.path.join(tmpdir, "fithic_output")
+            os.makedirs(output_dir, exist_ok=True)
+            nb_passes = config_data["AIF_PARAMS"]["nb_passes"]
+            cmd = [
+                "fithic",
+                "-i", input_path_gz,
+                "-f", bins_bed_gz,
+                "-o", output_dir,
+                "-r", str(binsize),
+                "-t", bias_path,
+                "-p", f"{nb_passes}",
+                "-b", f"{n_bins}",
+                "-U", str(binsize * n_bins),
+                "-L", str(binsize)
+            ]
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                print("STDOUT:", e.stdout)
+                print("STDERR:", e.stderr)
+                raise
+
+            # 5. Parse FItHiC output ONCE and write significant interactions BED
+            file_name = f"FitHiC.spline_pass{nb_passes}.res{binsize}.significances.txt.gz"
+            sig_file = os.path.join(output_dir, file_name)
+            sig_bed = os.path.join(tmpdir, "sig.bed")
+            with gzip.open(sig_file, 'rt') as fin, open(sig_bed, "w") as fout:
+                for i, line in enumerate(fin):
+                    if i == 0:
+                        continue  # Skip the first line, no matter what
+                    if line.startswith("#"):
+                        continue  # Skip comment lines
+                    fields = line.strip().split()
+                    bin1_start = int(fields[1]) - binsize//2 +1
+                    bin1_end = int(fields[1]) + binsize//2
+                    bin2_start = int(fields[3]) - binsize//2 + 1
+                    bin2_end = int(fields[3]) + binsize//2
+                    qval = float(fields[6])
+                    if qval <= fdr_threshold:
+                        fout.write(f"{chrom}\t{bin1_start}\t{bin1_end}\n")
+                        fout.write(f"{chrom}\t{bin2_start}\t{bin2_end}\n")
+
+            # 6. Run bedtools coverage
+            coverage_out = os.path.join(tmpdir, "coverage.txt")
+            cmd = [
+                "bedtools", "coverage",
+                "-a", bins_bed,
+                "-b", sig_bed,
+                "-counts"
+            ]
+            with open(coverage_out, "w") as fout:
+                subprocess.run(cmd, stdout=fout, check=True)
+
+            # 7. Parse coverage output
+            sig_counts = np.zeros(n_bins, dtype=int)
+            with open(coverage_out) as f:
+                for line in f:
+                    fields = line.strip().split()
+                    bin_idx = int(fields[3])
+                    count = int(fields[4])
+                    sig_counts[bin_idx] = np.log(count)
+        
+        mean_sig = np.mean(sig_counts[sig_counts != 0])
+        nsi = sig_counts/mean_sig
+
+        return nsi.tolist()
+
+    @property
+    def IF(self):
+        """
+        Property to get the adjusted interaction frequencies (AIF) for the matrix.
+        If the AIF is not computed yet, it will be computed using the 
+        get_adjusted_interaction_frequencies() method with the fdr_threshold value 
+        from the Config.yaml.
+        """
+        if self._IF is None:
+            self._IF = self.get_adjusted_interaction_frequencies()
+        return self._IF
 
     def get_compartmentalization(self, genome_path: str = None) -> list :
         """
@@ -691,25 +853,24 @@ class Matrix():
         """
         Method to get the bin corresponding to a given position (0-based)
         """
-        _, start, end = self.region
-        bin_range = (end - start)//len(self.obs_o_exp)
-        return (position - start)//bin_range
+        _, start, _ = self.region
+        return (position - start)//self.binsize
     
     def positions2bin_range(self, positions: list) -> list :
         """
         Method to get the bin corresponding to a given position list [start, end] (0-based)
         """
-        _, start, end = self.region
-        bin_range = (end - start)//len(self.obs_o_exp)
-        return [(positions[0] - start)//bin_range, (positions[1] - start)//bin_range]
+        _, start, _ = self.region
+        binsize = self.binsize
+        return [(positions[0] - start)//binsize, (positions[1] - start)//binsize]
   
     def bin2positions(self, bin: int) -> list :
         """
         Method to get the position corresponding to a given bin (0-based)
         """
         _, start, end = self.region
-        bin_range = (end - start)//len(self.obs_o_exp)
-        return [start + bin * bin_range, start + (bin + 1) * bin_range - 1]
+        binsize = self.binsize
+        return [start + bin * binsize, start + (bin + 1) * binsize - 1]
 
     @property
     def list_mutations(self) :
@@ -721,12 +882,49 @@ class Matrix():
             logging.info("There is no information about mutations in this Matrix object.")
             return None
     
+    def mutation_proportion_per_bin(self):
+        """
+        Returns a list of the proportion of each bin covered by mutations.
+        Each value is between 0 (no mutation) and 1 (fully mutated).
+        """
+        if not self.l_mut:
+            logging.info("No mutation information available.")
+            return None
+
+        n_bins = len(self.obs_o_exp)
+        bin_size = self.binsize
+        bin_start = self.region[1]
+
+        matrix_start = self.region[1]
+        matrix_end = self.region[2] - 1
+
+        filtered_mutations = [
+            (mut_start, mut_end)
+            for mut_start, mut_end in self.l_mut
+            if mut_end >= matrix_start and mut_end <= matrix_end
+        ]
+
+        proportions = []
+        for bin_idx in range(n_bins):
+            bin_s = bin_start + bin_idx * bin_size
+            bin_e = bin_s + bin_size - 1
+            overlap = 0
+            for mut_start, mut_end in filtered_mutations:
+                ov_start = max(bin_s, mut_start)
+                ov_end = min(bin_e, mut_end)
+                if ov_start <= ov_end:
+                    overlap += (ov_end - ov_start + 1)
+            proportions.append(overlap / bin_size)
+        return proportions
+
     def hist_mutations(self, 
                        gs: GridSpec = None,
                        f: figure.Figure = None,
                        i: int = 0, 
                        j: int = 0,
+                       ax: axes.Axes = None, 
                        title: str = None, 
+                       show_prop: bool = True, 
                        color: str = "#9900A7"):
         """
         Method to compute the histogram of the mutations in the matrix.
@@ -750,35 +948,54 @@ class Matrix():
         f = plt.figure(clear=True, figsize=(15, 10)) if f is None else f
         
         f_p_val, _, _ = self.formatting()
-        
-        l=None
-        if self.list_mutations is not None :
-            mut_pos = [num for start, stop in self.list_mutations for num in range(start, stop + 1)]
-            l = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+        ax = f.add_subplot(gs[i, j]) if axes is None else ax
 
         bins = self._obs_o_exp.shape[0] if self._obs_o_exp is not None else None
 
         ticks = [i for i in range(0, bins+1, bins//(len(f_p_val)-1))]
         
-        ax = f.add_subplot(gs[i, j])
-        
-        if (l is not None) and (bins is not None) :
-            ax.hist(l, bins=bins, orientation="horizontal", density=False, alpha=.7, color=color, edgecolor="black", linewidth=.01)
-            ax.set_xlabel("Number of Mutations", fontsize=18)
-            ax.set_ylabel("")
-            ax.set_ylim(0, 249)
-            ax.set_yticks(ticks=ticks, labels=f_p_val)
-            ax.tick_params(axis='x', labelsize=18)
-            ax.invert_yaxis()
-            ax.set_title(f"{title}", fontsize=22)
+        l=None
+        if show_prop :
+            l = self.mutation_proportion_per_bin()
             
-            return ax
-        
+            if (l is not None) and (bins is not None) :
+                y = range(bins)
+                ax.barh(y, l, color=color, alpha=.7, edgecolor="black", linewidth=.01)
+                ax.set_xlabel("Proportion Mutated", fontsize=18)
+                ax.set_ylabel("")
+                if np.max(l) > .8 :
+                    ax.set_xlim(0, 1)
+                ax.set_ylim(0, 249)
+                ax.invert_yaxis()
+                ax.set_yticks(ticks=ticks, labels=f_p_val)
+                ax.tick_params(axis='x', labelsize=18)
+                ax.invert_yaxis()
+                ax.set_title(f"{title}", fontsize=22)
+                ax.invert_yaxis()
+                return ax
+            else :
+                logging.info("There is no information about mutations in this Matrix object...histogram " \
+                            "of mutations is not computable.")
+            
         else :
-            logging.info("There is no information about mutations in this Matrix object...histogram " \
-                         "of mutations is not computable.")
-            ax.axis('off')
-            return None
+            if self.list_mutations is not None :
+                mut_pos = [num for start, stop in self.list_mutations for num in range(start, stop + 1)]
+                l = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
+
+            if (l is not None) and (bins is not None) :
+                ax.hist(l, bins=bins, orientation="horizontal", density=False, alpha=.7, color=color, edgecolor="black", linewidth=.01)
+                ax.set_xlabel("Number of Mutations", fontsize=18)
+                ax.set_ylabel("")
+                ax.set_ylim(0, 249)
+                ax.set_yticks(ticks=ticks, labels=f_p_val)
+                ax.tick_params(axis='x', labelsize=18)
+                ax.invert_yaxis()
+                ax.set_title(f"{title}", fontsize=22)
+                
+            
+            else :
+                logging.info("There is no information about mutations in this Matrix object...histogram " \
+                            "of mutations is not computable.")
             
 
     @property
@@ -798,6 +1015,19 @@ class Matrix():
             logging.info("There is no information about mutations in this Matrix object...distance " \
                          "to mutation is not computable.")
             return None
+
+
+    @property
+    def nb_mutated_pb(self) -> int:
+        """
+        Property to get the number of mutated positions in the matrix.
+        """
+        if self.l_mut is not None:
+            return np.sum([end - start + 1 for start, end in self.l_mut if start >= self.region[1] and end <= self.region[2] - 1])
+        else:
+            logging.info("There is no information about mutations in this Matrix object...number of mutated " \
+                         "positions is not computable.")
+            return 0
 
 
     def formatting(self, name: str = None):
@@ -902,81 +1132,6 @@ class Matrix():
         
         return ax
     
-    def heatmap_overlay(self,
-                        ax: axes,
-                        compartment: bool = False,
-                        genome_path: str = None,
-                        mutation: bool = False,
-                        ):
-        
-        """
-        Method to add information on the heatmap.
-        
-        Parameters
-        ----------
-        - ax : axes
-            the object that holds the plot elements of the heatmap.
-        - compartment : bool
-            whether to plot the compartmentalization of the matrix (determined
-            by the PC1 values). If True, then the compartmentalization is 
-            plotted. By default, compartment = False.
-        - genome_path : str
-            the path to the reference genome to use for getting the right 
-            phasing_track to use for compartment representation.
-        - mutation : bool
-            whether to plot the mutation position of the matrix (if they are 
-            given to the Matrix builder). If True, then the mutations are  
-            highlighted. By default, compartment = False.
-        
-        Returns
-        ----------
-         None
-
-         Side effects
-         ----------
-         Surcharges the heatmap with the relevent data represented.
-         """
-        TLVs = config_data["TLVs_HEATMAP"][self.__class__.__name__]
-        
-        m = get_property(self, self.which_matrix())
-        
-        if compartment:
-            pc1 = self.get_PC1(genome_path=genome_path)
-            rows, cols = m.shape
-
-            for i in range(1, len(pc1) - 1):
-                if pc1[i - 1] * pc1[i] < 0:
-                    if np.abs(pc1[i - 1] - pc1[i]) >= TLVs[0]:
-                        if 0 <= i < rows:  
-                            ax.plot([0, cols-1], [i, i], 'k', lw=2)
-                        if 0 <= i < cols: 
-                            ax.plot([i, i], [0, rows-1], 'k', lw=2)
-
-                if ((pc1[i - 1] < pc1[i] > pc1[i + 1]) 
-                                or (pc1[i - 1] > pc1[i] < pc1[i + 1])) \
-                    and (np.abs(pc1[i - 1] - pc1[i]) >= TLVs[1] 
-                                and np.abs(pc1[i + 1] - pc1[i]) >= TLVs[1]):
-                    if 0 <= i < rows:  
-                        ax.plot([0, cols-1], [i, i], color="gray", lw=1)
-                    if 0 <= i < cols:  
-                        ax.plot([i, i], [0, rows-1], color="gray", lw=1)
-
-        if mutation :
-            mut_pos = list(set(num for start, stop in self.list_mutations for num in range(start, stop + 1)))
-            mut_pos = [bin_idx for bin_idx in mut_pos if 0<=bin_idx<=249]
-            for bin_idx in mut_pos :
-                # Highlight the mutated bin as a vertical band
-                h = ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymax=.01, color='green', alpha=.5, label="Mutation")
-                ax.axvspan(bin_idx - 0.5, bin_idx + 0.5, ymin=.99, color='green', alpha=.5)
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmax=.01, color='green', alpha=.5)
-                ax.axhspan(bin_idx - 0.5, bin_idx + 0.5, xmin=.99, color='green', alpha=.5)
-            
-            legend = ax.legend(handles=[h], loc='best', bbox_to_anchor=(0.99, 0.98)) if mut_pos != [] else None
-            if legend is not None:
-                legend.set_title(legend.get_title().get_text(), prop={'size': 20})
-                for text in legend.get_texts():
-                    text.set_fontsize(20)
-
     def heatmap_plot(self,
                      gs: GridSpec,
                      f: figure.Figure,
@@ -995,8 +1150,7 @@ class Matrix():
         """
         ax = self.heatmap(gs=gs, f=f, i=i, j=j, vmin=vmin, vmax=vmax, name=name)
 
-        self.heatmap_overlay(ax=ax, compartment=compartment, genome_path=genome_path, 
-                             mutation=mutation)
+        heatmap_overlay(mat1=self, comp_type="", mutation=mutation, ax=ax, saddle=False, compartment=compartment)
         
         if output_file: 
             plt.savefig(output_file, transparent=True)
@@ -1259,13 +1413,19 @@ class OrcaMatrix(Matrix):
         region, resolution, self.orcapred, self.normmat, genome \
                     = load_attributes_orca_matrix(orcapredfile, normmatfile)
         super().__init__(region, resolution, genome, gtype, list_mutations, refgenome)
+        self._log_obs = None
         
     
     @property
-    def obs_o_exp(self):
-        self._obs_o_exp = self.orcapred
+    def log_obs_o_exp(self):
         return self.orcapred
 
+    @property
+    def obs_o_exp(self) :
+        if self._obs_o_exp is None :
+            self._obs_o_exp = np.exp(self.log_obs_o_exp)
+        return self._obs_o_exp
+    
     @property
     def expect(self):
         if self._expect is None :
@@ -1286,17 +1446,22 @@ class OrcaMatrix(Matrix):
         return self._expect
     
     @property
-    def obs(self):
-        if self._obs is None:
-            obs_o_exp = replace_nan_with_neighbors_mean(self.obs_o_exp)
+    def log_obs(self):
+        if self._log_obs is None:
+            log_obs_o_exp = replace_nan_with_neighbors_mean(self.log_obs_o_exp)
             
             expect = replace_nan_with_neighbors_mean(self.expect)
             expect = np.where(expect>0, expect, np.nanmean(expect)*1e-2)
             
-            m = np.add(obs_o_exp, np.log(expect))
-            self._obs = m
-        return self._obs
+            m = np.add(log_obs_o_exp, np.log(expect))
+            self._log_obs = m
+        return self._log_obs
     
+    @property
+    def obs(self) :
+        if self._obs is None:
+            self._obs = np.exp(self.log_obs)
+        return self._obs
     
     def get_genome(self):
         return self.genome
@@ -1316,7 +1481,8 @@ class OrcaMatrix(Matrix):
         return scores
 
     def get_PC1(self, genome_path: str = None) -> list :
-        A = replace_nan_with_neighbors_mean(self.obs)
+        m = get_property(self, self.which_matrix("PC1"))
+        A = replace_nan_with_neighbors_mean(m)
 
         A = np.exp(A)
             
@@ -1726,42 +1892,19 @@ def join_triangular_matrices(mat1: np.ndarray, mat2: np.ndarray):
     return new_mat
 
 
-def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, 
-                          i: int = 0, j: int = 0, saddle: bool = False, compartment: bool = False):
+def heatmap_overlay(mat1: Matrix, mat2: Optional[Matrix], comp_type: str, mutation: bool, ax: axes,   
+                    saddle: bool, compartment: bool):
     """
     """
-    f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
+    mat2 = mat1 if mat2 is None else mat2
 
-    ax = f.add_subplot(gs[i, j])
-
-    mat_1 = mat1.saddle_mat[0] if saddle else get_property(mat1, mat1.which_matrix(mtype="heatmap"))
-    mat_2 = mat2.saddle_mat[0] if saddle else get_property(mat2, mat2.which_matrix(mtype="heatmap"))
-    
-    if comp_type == "triangular" :
-        m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
-        vmin, vmax = [-0.95, 0.95] if saddle else mat1.get_extremum_heatmap()
-    elif comp_type == "substract" :
-        m = mat_2 - mat_1
-        cmap = blue_cmap
-        coeff = (np.max(m) - np.min(m)) / .4
-        vmin, vmax = [-0.17*coeff, 0.23*coeff] if saddle else config_data["EXTREMUM_HEATMAP"]["Substract_mats"]
-    else : 
-        raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
-    
-    ax.imshow(m, 
-              cmap=cmap, 
-              interpolation='nearest', 
-              aspect='auto', 
-              vmin=vmin, 
-              vmax=vmax)
-    
     if mutation or compartment:
         color1, color2, alpha = ('yellow', 'yellow', .75) if comp_type == "substract" else ('purple', 'purple', .5)
         hyp_mut_pos = False
 
         sort_mut_pos1, sort_mut_pos2 = None, None
         sorted_indices1 = mat1.saddle_mat[1] if saddle else sort_mut_pos1
-        sorted_indices2 = mat2.saddle_mat[1] if saddle else sort_mut_pos2
+        sorted_indices2 = mat2.saddle_mat[1] if (saddle and mat2 is not None) else sort_mut_pos2
         
         if mat1.list_mutations is not None :
             mut_pos1 = list(set(num for start, stop in mat1.list_mutations for num in range(start, stop + 1)))
@@ -1838,8 +1981,12 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
                 i += 1
         
         elif compartment :
-            indices1 = [i for i in range(1, len(comp_pos1)) if comp_pos1[i] != comp_pos1[i-1]]
-            indices2 = [i for i in range(1, len(comp_pos2)) if comp_pos2[i] != comp_pos2[i-1]]
+            indices1 = [i for i in range(1, len(comp_pos1)) if comp_pos1[i] != comp_pos1[i-1] 
+                                                            and comp_pos1[i] != "U" 
+                                                            and comp_pos1[i-1] != "U"]
+            indices2 = [i for i in range(1, len(comp_pos2)) if comp_pos2[i] != comp_pos2[i-1] 
+                                                            and comp_pos2[i] != "U" 
+                                                            and comp_pos2[i-1] != "U"]
             n1 = len(comp_pos1) - 1
             n2 = len(comp_pos2) - 1
             
@@ -1847,12 +1994,48 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
                 for ind1 in indices1 :
                     ax.plot([ind1, n1], [ind1, ind1], '--k', lw=2)
                     ax.plot([ind1, ind1], [0, ind1], '--k', lw=2)
-            if (len(indices2) <= 30) and (mat2.resolution in ["8Mb", "16Mb", "32Mb"]) :
+            if (len(indices2) <= 30) and mat2.resolution in ["8Mb", "16Mb", "32Mb"] :
                 for ind2 in indices2 : 
-                    ax.plot([0, ind2], [ind2, ind2], '-.', color="gray", lw=2)
-                    ax.plot([ind2, ind2], [ind2, n2], '-.', color="gray", lw=2)
+                    ax.plot([0, ind2], [ind2, ind2], '-.k', lw=2)
+                    ax.plot([ind2, ind2], [ind2, n2], '-.k', lw=2)
+        
+        return h, hyp, c_a, c_b 
 
+
+
+def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: bool, gs: GridSpec, f: figure.Figure, 
+                          i: int = 0, j: int = 0, saddle: bool = False, compartment: bool = False):
+    """
+    """
+    f_p_val, titles, cmap = mat1.formatting(f"Comparison({mat1.genome}-{mat2.genome})")
+
+    ax = f.add_subplot(gs[i, j])
+
+    mat_1 = mat1.saddle_mat[0] if saddle else get_property(mat1, mat1.which_matrix(mtype="heatmap"))
+    mat_2 = mat2.saddle_mat[0] if saddle else get_property(mat2, mat2.which_matrix(mtype="heatmap"))
     
+    if comp_type == "triangular" :
+        m = join_triangular_matrices(mat1=mat_1, mat2=mat_2)
+        vmin, vmax = [-0.95, 0.95] if saddle else mat1.get_extremum_heatmap()
+    elif comp_type == "substract" :
+        m = mat_2 - mat_1
+        cmap = blue_cmap
+        coeff = (np.max(m) - np.min(m)) / .4
+        vmin, vmax = [-0.17*coeff, 0.23*coeff] if saddle else config_data["EXTREMUM_HEATMAP"]["Substract_mats"]
+    else : 
+        raise ValueError(f"The {comp_type} comparison is not a supported type...Exiting.")
+    
+    ax.imshow(m, 
+              cmap=cmap, 
+              interpolation='nearest', 
+              aspect='auto', 
+              vmin=vmin, 
+              vmax=vmax)
+    
+    handles = heatmap_overlay(mat1=mat1, mat2=mat2, comp_type=comp_type, mutation=mutation, 
+                              ax=ax, saddle=saddle, compartment=compartment)
+    handles = list(handle for handle in handles if handle is not None) if handles is not None else None
+
     ax.set_title(f"{titles[0]}\nChrom : {titles[1]}, Start : {titles[2]}, "
                     f"End : {titles[3]}, Resolution : {titles[4]}\n", 
                     fontsize=22
@@ -1865,12 +2048,8 @@ def heatmap_matrices_comp(mat1: Matrix, mat2: Matrix, comp_type: str, mutation: 
     ax.tick_params(axis='both', labelsize=22)
     format_ticks(ax, x=False, y=False)
     if mutation or compartment:
-        handles = [h] if h else [] 
-        handles += [hyp] if hyp else []
-        handles += [c_a] if c_a else []
-        handles += [c_b] if c_b else []
         legend = ax.legend(handles=handles, loc='best', bbox_to_anchor=(0.98, 0.98)) \
-                                            if (sort_mut_pos1 != [] and sort_mut_pos2 != []) else None
+                                            if handles is not None else None
         if legend is not None:
             legend.set_title(legend.get_title().get_text(), prop={'size': 20})
             for text in legend.get_texts():
@@ -2061,6 +2240,63 @@ class CompareMatrices():
         
         return matrices
 
+    def nb_mutated_pb(self, resol: str, run: str = None):
+        """
+        Method to get the number of mutated pb for a given resolution.
+        It only works if there is the same number of mutated pb in every 
+        matrices of this resolution in the compared MatrixView objects.
+        If there are any differneces, it will be specified in the logs, and 
+        it will raise an error.
+        
+        Parameters
+        ----------
+        resol : str
+            the resolution for which the number of mutated pb should be retrieved.
+        
+        Returns
+        ----------
+        int
+            the number of mutated pb for the given resolution.
+        """
+        if run is None :
+            same_nb = True
+            nb_mut = None
+
+            for name, obj in self.comp_dict.items():
+                if resol not in obj.di:
+                    logging.warning(f"The {name} object does not have a matrix for the resolution {resol}.")
+                    continue
+                
+                if nb_mut is None :
+                    nb_mut = obj.di[resol].nb_mutated_pb
+                    f_name = name
+                
+                else :
+                    if nb_mut != obj.di[resol].nb_mutated_pb :
+                        logging.warning(f"The {name} object does not have the same number of mutated pb "
+                                        f"as the reference ({f_name}) --resp. {obj.di[resol].nb_mutated_pb} "
+                                        f"and {nb_mut}) for the resolution {resol}.")
+                        same_nb = False
+                        continue
+            
+            if not same_nb :
+                raise ValueError(f"The number of mutated pb is not the same for all the compared "
+                                f"objects for the resolution {resol}...Exiting.")
+            return nb_mut
+        
+        else :
+            if run == "ref" :
+                if resol not in self.ref.di:
+                    raise ValueError(f"The reference object does not have a matrix for the resolution {resol}.")
+                return self.ref.di[resol].nb_mutated_pb
+            else :
+                if run not in self.comp_dict:
+                    raise ValueError(f"The {run} object does not exist in the compared objects.")
+                if resol not in self.comp_dict[run].di:
+                    raise ValueError(f"The {run} object does not have a matrix for the resolution {resol}.")
+                return self.comp_dict[run].di[resol].nb_mutated_pb
+        
+
 
     @property
     def value_deviation_mat(self) -> List[dict] :
@@ -2169,6 +2405,7 @@ class CompareMatrices():
             self._value_deviation_PC1 = self.value_deviation_score(score_type="PC1")
         
         return self._value_deviation_PC1
+
 
     def heatmaps(self, 
                  output_file: str = None, 

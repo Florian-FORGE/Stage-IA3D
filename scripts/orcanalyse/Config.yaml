@@ -8,6 +8,7 @@ COLOR_CHART:
   insulation_count: blue
   PC1: green
   insulation_correl: red
+  IF: "#3B0B47"
 
 # TF Dificile à comprendre....
 WHICH_MATRIX:
@@ -15,14 +16,20 @@ WHICH_MATRIX:
     heatmap: _obs_o_exp
     count: _obs
     correl: _obs
+    PC1: _obs
+    aif: _obs
   OrcaMatrix:
-    heatmap: obs_o_exp
-    count: obs
-    correl: obs
+    heatmap: log_obs_o_exp
+    count: log_obs
+    correl: log_obs
+    PC1: log_obs
+    aif: obs
   RealMatrix:
     heatmap: log_obs_o_exp
     count: log_obs
     correl: log_obs
+    PC1: log_obs
+    aif: obs
 
 REF_GENOME: ../notebooks/resources/genome/Homo_sapiens.GRCh38.dna.primary_assembly/sequence.fa
 
@@ -74,3 +81,7 @@ DISPERSION_COLOR:
   PC1: "ch:s=1.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
   insulation_correl: "ch:s=.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
   default: "ch:s=0, rot=3, dark=.6, light=.4, hue=2, gamma=1.75"
+
+AIF_PARAMS:
+  fdr_threshold: .05
+  nb_passes: 1

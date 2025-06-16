@@ -14,7 +14,7 @@ from matplotlib.gridspec import GridSpec
 import random as rd
 
 
-def analysis_plot(prediction_log_path: str, analysis_path:str, l_score_types: list, l_comp_types: list, merged_by:str = None, l_resol: list = None):
+def analysis_plot(expe_descrip: str, prediction_log_path: str, analysis_path:str, l_score_types: list, l_comp_types: list, merged_by:str = None, l_resol: list = None):
     """
     
     """
@@ -81,9 +81,9 @@ def analysis_plot(prediction_log_path: str, analysis_path:str, l_score_types: li
 
 
 
-def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: list, 
-                   merged_by:str = None, l_resol: list = None, show_rdm: bool = False, 
-                   show_compartments: bool = False):
+def analysis_slide(expe_descrip: str, prediction_log_path: str, analysis_path:str, 
+                   l_score_types: list, merged_by:str = None, l_resol: list = None, 
+                   show_rdm: bool = False, show_compartments: bool = False):
     """
     """
     if not os.path.exists(analysis_path):
@@ -113,6 +113,15 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
             l_resol += ["1Mb", "2Mb", "4Mb"]
         if "PC1" in l_score_types : 
             l_resol += ["8Mb", "16Mb", "32Mb"]
+
+    nb_mut_max = mat_comparisons.nb_mutated_pb(resol=l_resol[-1], run='orcarun_Wtd_mut')
+    if nb_mut_max > 1_000_000 :
+        nb_mut_max = f"{nb_mut_max/1_000_000:.1f}Mb"
+    elif nb_mut_max > 1_000 :
+        nb_mut_max = f"{nb_mut_max/1_000:.1f}kb"
+    else :
+        nb_mut_max = f"{nb_mut_max}pb"
+    
     
     log_info = ""
     for resol in l_resol :
@@ -120,6 +129,16 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
         saddle_path = f"{analysis_path}/saddle_{resol}.pdf" \
                                     if resol in ["8Mb", "16Mb", "32Mb"] else None
 
+    
+        nb_mut_resol = mat_comparisons.nb_mutated_pb(resol=resol, run='orcarun_Wtd_mut')
+        if nb_mut_resol > 1_000_000 :
+            nb_mut_resol = f"{nb_mut_resol/1_000_000:.1f}Mb"
+        elif nb_mut_resol > 1_000 :
+            nb_mut_resol = f"{nb_mut_resol/1_000:.1f}kb"
+        else :
+            nb_mut_resol = f"{nb_mut_resol}pb"
+        
+        
         if os.path.exists(plots_path) :
             os.remove(plots_path)
         
@@ -131,14 +150,16 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
             gs = GridSpec(nrows= 1 + nb_scores, ncols=5, height_ratios=height_ratios, width_ratios=width_ratios) \
                                 if not show_rdm else GridSpec(nrows= 1 + nb_scores, ncols=7, width_ratios=width_ratios)
             f = plt.figure(clear=True, figsize=(60, 33.75)) if not show_rdm else plt.figure(clear=True, figsize=(80, 45))
+            f.suptitle(f"{expe_descrip} ({nb_mut_max} mutated - {nb_mut_resol} locally)", fontsize=48)
             
             log_info += f"To produce the plots in plots_{resol}.pdf the following method and arguments were used :\n"
 
             mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=l_score_types, mutation=True, gs=gs, f=f, show_legend=True, compartment=show_compartments)
             log_info += f"mat_comparisons.plot_2_matices_comp(_2_run=['ref', 'orcarun_Wtd_mut'], resol={resol}, comp_type='triangular', l_score_types={l_score_types}, mutation=True, gs=gs, f=f, show_legend=True, compartment={show_compartments})\n"
 
-            mat_comparisons.ref.di[resol].hist_mutations(gs=gs, f=f, j=1)
-            mat_comparisons.comp_dict["orcarun_Wtd_mut"].di[resol].hist_mutations(gs=gs, f=f, j=1, title=f"Mutation repartition\n")
+            ax = f.add_subplot(gs[0, 1])
+            mat_comparisons.ref.di[resol].hist_mutations(gs=gs, f=f, ax=ax)
+            mat_comparisons.comp_dict["orcarun_Wtd_mut"].di[resol].hist_mutations(gs=gs, f=f, ax=ax, title=f"Mutation repartition\n")
             log_info += f"mat_comparisons.ref.di[{resol}].hist_mutations(gs=gs, f=f, j=1)\n"
             log_info += f"mat_comparisons.comp_dict['orcarun_Wtd_mut'].di[{resol}].hist_mutations(gs=gs, f=f, j=1, title='Mutation repartition')\n"
             
@@ -170,7 +191,27 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
                 ax = f.add_subplot(gs[1:nb_scores+1, 6])
                 mat_comparisons.dispersion_plot(data_type="score", l_resol=[resol], merged_by=merged_by, mut_dist=True, score_type = "insulation_count", gs=gs, f=f, ax=ax)
                 log_info += f"mat_comparisons.dispersion_plot(data_type='score', l_resol=[{resol}], merged_by={merged_by}, mut_dist=True, score_type = insulation_count, gs=gs, f=f, ax=ax)\n"
-                       
+
+        rdm_mut_data = ""
+        for name in mat_comparisons.comp_dict.keys() :
+            if name != "orcarun_Wtd_mut" :
+                mut_data = mat_comparisons.nb_mutated_pb(resol=resol, run=name)
+                if mut_data > 1_000_000 :
+                    mut_data = f"- {name}  :  {mut_data/1_000_000:.1f}Mb mutated\n"
+                elif mut_data > 1_000 :
+                    mut_data = f"- {name}  :  {mut_data/1_000:.1f}kb mutated\n"
+                else :
+                    mut_data = f"- {name}  :  {mut_data}pb mutated\n"
+                
+                rdm_mut_data += mut_data
+        footnote = f"For random mutations :\n{rdm_mut_data}"
+        l_r_pos, t_d_pos = 0.99, 0.98
+        if len(mat_comparisons.comp_dict.keys()) > 11 :
+            footnote = f"For random mutations :"
+            pdf.attach_note(rdm_mut_data, positionRect = [3900, 2380, 3900, 2380])
+            l_r_pos, t_d_pos = 0.9, 0.978
+        f.text(l_r_pos, t_d_pos, footnote, ha='right', va='top', fontsize=18, transform=f.transFigure)               
+        
         pdf.savefig()
         pdf.close()
         log_info += f"\n"
@@ -189,7 +230,8 @@ def analysis_slide(prediction_log_path: str, analysis_path:str, l_score_types: l
                     range_rdm = range(0, len(mat_comparisons.comp_dict)-2)
                     gs = GridSpec(nrows=2, ncols=len(range_rdm)+1)
                     f = plt.figure(clear=True, figsize=(20*(len(range_rdm)+1), 33.75))
-
+                    f.suptitle(f"{expe_descrip} ({nb_mut_max} mutated - {nb_mut_resol} locally)", fontsize=48)
+            
                     mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="triangular", l_score_types=[], mutation=True, saddle=True, gs=gs, f=f, i=0, j=0, compartment=show_compartments)
                     mat_comparisons.plot_2_matices_comp(_2_run=["ref", "orcarun_Wtd_mut"], resol=resol, comp_type="substract", l_score_types=[], mutation=True, saddle=True, gs=gs, f=f, i=1, j=0, compartment=show_compartments)
                     for j in range_rdm:
@@ -224,6 +266,8 @@ def parse_arguments():
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
     
+    parser.add_argument("--expe_descrip",
+                        required=True, help="The name of the experiment. It will be used in the title inside of the output pdf.")
     parser.add_argument("--prediction_log_path",
                        required=True, help="The path to the directory in which the two files 'ref_orarun.csv' and " \
                                            "'orarun.csv' are srored.")
@@ -259,12 +303,13 @@ if __name__ == '__main__':
     show_rdm = bool(args.show_rdm.lower() == "true") if args.show_rdm is not None else False
     show_compartments = bool(args.show_compartments.lower() == "true") if args.show_compartments is not None else False
    
-    analysis_slide(prediction_log_path=args.prediction_log_path, 
-                  analysis_path=args.analysis_path, 
-                  l_score_types=l_score_types, 
-                  merged_by=args.merged_by,
-                  l_resol=l_resol,
-                  show_rdm=show_rdm,
-                  show_compartments=show_compartments)
+    analysis_slide(expe_descrip=args.expe_descrip, 
+                   prediction_log_path=args.prediction_log_path, 
+                   analysis_path=args.analysis_path, 
+                   l_score_types=l_score_types, 
+                   merged_by=args.merged_by,
+                   l_resol=l_resol,
+                   show_rdm=show_rdm,
+                   show_compartments=show_compartments)
    
 

@@ -11,9 +11,12 @@ import mutate_with_rdm as mm
 from pysam import FastaFile
 from Bio import SeqIO
 
+from typing import List
 
 
-def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: str = "shuffle", nb_random: int = 0, rdm_pos: bool = True):
+def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: str = "shuffle", 
+                             sequence:str = ".", nb_random: int = 0, rdm_pos: bool = True, 
+                             excluded_domains: str = None, included_into: str = None):
     """
     Applies mutations to a reference sequence and generates random mutations if specified.
     This function processes a given region of a reference sequence by applying mutations
@@ -50,7 +53,7 @@ def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: s
     relative_fasta = filepaths["relative_fasta"] if "relative_fasta" in filepaths.keys() else None
     
     if relative_bed:
-        mutations = mm.read_mutations_from_BED(relative_bed, muttype=muttype)
+        mutations = mm.read_mutations_from_BED(relative_bed, muttype=muttype, sequence=sequence)
     else:
         mutations = mm.read_mutations_from_tsv(relative_tsv)
     
@@ -60,7 +63,9 @@ def mutate_and_rdm_mutations(abs_to_rel_log_path: str, mut_path: str, muttype: s
     for i in range(nb_random):
         rdm_seed = 3+i
         if rdm_pos:
-            random_mutations = mm.generate_random_pos_mutations(mutations=mutations, genome=relative_fasta, rdm_seed=rdm_seed, muttype=muttype)
+            random_mutations = mm.generate_random_pos_mutations(mutations=mutations, genome=relative_fasta, rdm_seed=rdm_seed, 
+                                                                muttype=muttype, excluded_domains=excluded_domains, 
+                                                                included_into=included_into)
         else :
             random_mutations = mm.generate_random_mutations(mutations=mutations, rdm_seed=rdm_seed)
         
@@ -105,14 +110,30 @@ def parse_arguments():
                         required=True, help="The path to the output directory to store the relative sequences and traces.")
     parser.add_argument("--muttype", 
                         required=False, help="The mutation type to apply to the randomly mutated genomes.")
+    parser.add_argument("--sequence",
+                        required=False, help="The sequence to insert in case '--muttype insertion' is given. If the sequence is shorter than the intervals, it will be repeated to fit. If it is longer, an error will be raised. This flag should not be used if the following is not : '--muttype insertion'.")
     parser.add_argument("--nb_random",
                         required=True, type=int, 
                         help="The number of randomly mutated genome file to generate (not counting the wanted mutation).")
     parser.add_argument("--rdm_seq",
                         required=False, 
                         help="Weither the mutations will be generated at random positions in the genome (by default), or at the same positions as in the input file bu putting random sequences in place of this mutations (if 'True').")
+    
+    group = parser.add_mutually_exclusive_group(required=False)
+    group.add_argument("--excluded_domains",
+                       help="a file containing data about domains in which random mutations should not be placed, in bed formaat, with 3 columns: chrom start end. Should not be used if rdm_seq is True.")
+    group.add_argument('--included_into',
+                        help='a file containing data about domains in which random mutations should be placed, in bed format, with 3 columns: chrom start end. Should not be used if rdm_seq is True.')
+
         
     args = parser.parse_args()
+
+    if ((args.excluded_domains or args.included_into) 
+                        and bool(args.rdm_seq.lower() == "true")):
+        parser.error("--excluded_domains and --included_into should only be used if not --rdm_seq True")
+    
+    if args.sequence and not bool(args.muttype.lower() == "insertion") :
+        parser.error("--sequence should only be used if --muttype insertion is given")
 
     return args
 
@@ -127,6 +148,9 @@ if __name__ == '__main__':
     mutate_and_rdm_mutations(abs_to_rel_log_path=args.abs_to_rel_log_path, 
                              mut_path=args.mut_path, 
                              muttype=muttype, 
+                             sequence=args.sequence, 
                              nb_random=args.nb_random, 
-                             rdm_pos=rdm_pos)
+                             rdm_pos=rdm_pos, 
+                             excluded_domains=args.excluded_domains, 
+                             included_into=args.included_into)
 

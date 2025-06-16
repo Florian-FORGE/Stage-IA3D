@@ -7,6 +7,7 @@ sys.path.append(f"{c_path}/mutations")
 
 import mutation as m
 import mutate_with_rdm as mm
+import create_rdm_bed as crb
 
 from pysam import FastaFile
 from Bio import SeqIO
@@ -16,8 +17,11 @@ from Bio.SeqRecord import SeqRecord
 
 import pandas as pd
 
-
-
+import logging
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def relative_bed(bed: str, 
@@ -66,8 +70,9 @@ def relative_bed(bed: str,
 
         r_start = int(fields[1]) - start
         r_end = int(fields[2]) - start
+        strand = [fields[4]] if len(fields) > 4 else ["-"]
 
-        new_line = "\t".join([f"fake_{chrom}", f"{r_start}", f"{r_end}"] + fields[3] + ["-"] + fields[4:])
+        new_line = "\t".join([f"fake_{chrom}", f"{r_start}", f"{r_end}"] + [fields[3]] + strand + fields[4:])
         new_bed += f"{new_line}\n"
     
     
@@ -125,7 +130,9 @@ def relative_tsv(tsv: str,
     return df_sorted_wtd
        
 
-def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, region: list) :
+def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, region: list, 
+                             excluded_domains: str = None, interval_size: int =None, 
+                             nb_intervals: int =None) :
     """
     Generates a reference sequence and a relative BED or TSV file based on the given genomic region.
     This function extracts a specific genomic region from a FASTA file, saves it as a new FASTA file, 
@@ -157,7 +164,8 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
     fasta_handle = FastaFile(fasta)
     ref = fasta_handle.fetch(chrom, start-1, end)
     seq_record = SeqRecord(Seq(ref).upper(), id=f"fake_{chrom}",
-                               description=f"\t{(end-start)//1e6}Mb extracted from {name}\tOffset (1-based) : {start}")
+                               description=f"\t{(end-start)//1e6}Mb extracted "
+                                           f"from {name}\tOffset (1-based) : {start}")
     
     fasta_path = f"{output_path}/sequence.fa"
     if os.path.exists(fasta_path) :
@@ -176,7 +184,7 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
         
         mutation_line = f"Relative_bed\t{new_bed_path}"
 
-    else:
+    elif tsv:
         df = relative_tsv(tsv=tsv, chrom=chrom, start=start, end=end)
 
         new_bed_path = f"{output_path}/relative_position_mutations.csv"
@@ -186,6 +194,15 @@ def ref_seq_and_relative_bed(bed: str, tsv: str, fasta: str, mut_path: str, regi
         df.to_csv(new_bed_path, sep="\t", index=False, header=True)
 
         mutation_line = f"Relative_tsv\t{new_bed_path}"
+
+    else :
+        new_bed_path = f"{output_path}/relative_position_mutations.bed"
+        crb.random_bed(output=new_bed_path, bedfile=excluded_domains, region_size=end-start, 
+                       interval_size=interval_size, nb_intervals=nb_intervals)
+        
+        mutation_line = f"Relative_bed\t{new_bed_path}"
+
+
     
     log_path = f"{output_path}/resume.log"
     with open(log_path, "w") as flog :
@@ -216,7 +233,7 @@ def parse_arguments():
                                      Mutate a genome fasta sequence according to the mutations specified in a bed file
                                      '''))
     
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--bed",
                        help="the mutation file in bed format.")
     group.add_argument('--tsv',
@@ -229,7 +246,24 @@ def parse_arguments():
     parser.add_argument("--region",
                         required=True, help="The region that you work on. It should be given as follow : 'chrom:start-end'.")
     
+    parser.add_argument("--excluded_domains",
+                        required=False, help="A file containing data about domains in which random mutations should not be placed, in bed formaat, with 3 columns: chrom start end. Should not be used if there is a bed or tsv file.")
+    parser.add_argument("--interval_size",
+                        required=False, help="The size of the intervals to generate. Should not be used if there is a bed or tsv file.")
+    parser.add_argument("--nb_intervals",
+                        required=False, help="Tyhe number of intervals to generate. Should not be used if there is a bed or tsv file.")
+    
     args = parser.parse_args()
+
+    if ((args.excluded_domains 
+         or args.interval_size 
+         or args.nb_intervals) 
+                            and (args.bed or args.tsv)) :
+        parser.error("--excluded_domains and --interval_size and --nb_intervals should only be used if --bed and --tsv are not given")
+
+
+    if not(args.bed or args.tsv) :
+        logging.info("Neither --bed or --tsv arguments were given. Random intervals were generated and stored in a .bed file.")
 
     return args
 
@@ -240,12 +274,20 @@ if __name__ == '__main__':
     chrom, pos = args.region.split(":")
     start, end = pos.split("-")
     region = [chrom, int(start), int(end)]
+
+    excluded_domains = args.excluded_domains if args.excluded_domains is not None else None
+    interval_size = int(args.interval_size) if args.interval_size is not None else 312
+    nb_intervals = int(args.nb_intervals) if args.nb_intervals is not None else 10_000
+
     
     ref_seq_and_relative_bed(bed=args.bed, 
                              tsv=args.tsv, 
                              fasta=args.fasta, 
                              mut_path=args.mut_path,
-                             region=region)
+                             region=region,
+                             excluded_domains=excluded_domains, 
+                             interval_size=interval_size, 
+                             nb_intervals=nb_intervals)
    
 
 

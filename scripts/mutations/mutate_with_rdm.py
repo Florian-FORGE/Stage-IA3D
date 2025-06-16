@@ -209,7 +209,9 @@ def generate_random_pos_mutations(mutations: List[Mutation],
                                   chromsize: int = None, 
                                   rdm_seed: int = None,
                                   muttype: str = "shuffle",
-                                  sequence: str = None
+                                  sequence: str = None, 
+                                  excluded_domains: str = None, 
+                                  included_into: str = None
                                   ) -> List[Mutation] :
     """
     Generate random list of Mutations having the same kind of mutations as the 
@@ -240,7 +242,16 @@ def generate_random_pos_mutations(mutations: List[Mutation],
             chromlen = chromsize if chromsize is not None else len(fasta_handle[chr])
             fs.write(f"{chr}\t{chromlen}\n")
 
-    rdm_bed = bed.shuffle(g=f"{dir}/chrom_size.csv", seed=rdm_seed, noOverlapping = True)
+    # rdm_bed = bed.shuffle(g=f"{dir}/chrom_size.csv", seed=rdm_seed, noOverlapping = True, 
+    #                       excl=excl, incl=incl)
+
+    shuffle_kwargs = {"g": f"{dir}/chrom_size.csv", "seed": rdm_seed, "noOverlapping": True}
+    if excluded_domains is not None:
+        shuffle_kwargs["excl"] = excluded_domains
+    elif included_into is not None:
+        shuffle_kwargs["incl"] = included_into
+
+    rdm_bed = bed.shuffle(**shuffle_kwargs)
 
     intervals = []
     for line in rdm_bed:
@@ -293,7 +304,8 @@ def generate_random_mutations(mutations: List[Mutation],
     return rdm_mutations
 
 
-def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0, rdm_pos: bool = True) :
+def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int = 0, 
+         rdm_pos: bool = True, excluded_domains: str = None, included_into: str = None) :
     
     if bed:
         mutations = read_mutations_from_BED(bed, mutationtype)
@@ -306,7 +318,9 @@ def main(mutationfile, bed, genome, path: str, mutationtype: str, nb_random: int
     for i in range(nb_random):
         rdm_seed = (3+i)**3
         if rdm_pos:
-            random_mutations = generate_random_pos_mutations(mutations=mutations, genome=genome, rdm_seed=rdm_seed, muttype=mutationtype)
+            random_mutations = generate_random_pos_mutations(mutations=mutations, genome=genome, rdm_seed=rdm_seed, 
+                                                             muttype=mutationtype, excluded_domains=excluded_domains, 
+                                                             included_into=included_into)
         else :
             random_mutations = generate_random_mutations(mutations=mutations, rdm_seed=rdm_seed)
         mutators[f"Rdm_mut_{i}"] = Mutator(fasta_handle, random_mutations)
@@ -340,21 +354,34 @@ def parse_arguments():
                         required=True, help="the path to the output directory to store the mutated sequences and the corresponding traces")
     parser.add_argument("--extend_to",
                         required=False, help="The size of the range in which the mutations should be generated. If this flag is given then the rnage will be extended the specified range.")
+    
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--bed",
-                       help="the format of the mutation file is bed")
+                       help="the mutation file in bed format")
     group.add_argument('--mutationfile',
                         help='the mutation file, see documentation for the format')
+    
     parser.add_argument("--mutationtype",
                         required=False, help="Specify the type of mutation to perform (only allowed if --bed is set), default='shuffle'")
     parser.add_argument("--rdm_pos",
                         required=False, 
-                        help="Weither the mutations will be generated at random positions in the genome, or at the same positions as in the input file bu putting random sequences in place of this mutations.")
+                        help="Weither the mutations will be generated at random positions in the genome, or at the same positions as in the input file bu putting random sequences in place of this mutations. By default, the mutations will be generated at random positions.",)
     
+    group2 = parser.add_mutually_exclusive_group(required=False)
+    group2.add_argument("--excluded_domains",
+                       help="a file containing data about domains in which random mutations should not be placed, in bed formaat, with 3 columns: chrom start end. Should not be used if rdm_pos is False.")
+    group2.add_argument('--included_into',
+                        help='a file containing data about domains in which random mutations should be placed, in bed format, with 3 columns: chrom start end. Should not be used if rdm_pos is False.')
+
+
     args = parser.parse_args()
 
     if args.mutationtype and not args.bed:
         parser.error("--mutationtype can only be used with --bed")
+    
+    if ((args.excluded_domains and bool(args.rdm_pos.lower() == "false")) 
+                        or (args.included_into and bool(args.rdm_pos.lower() == "false"))) :
+        parser.error("--excluded_domains and --included_into should only be used if not --rdm_pos False")
     
     return args
 
@@ -362,7 +389,7 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    rdm_pos  = bool(args.rdm_pos.lower() == "true") if args.rdm_pos is not None else False
+    rdm_pos  = bool(args.rdm_pos.lower() == "true") if args.rdm_pos is not None else True
 
     main(mutationfile=args.mutationfile, 
          bed=args.bed, 
@@ -371,7 +398,9 @@ if __name__ == '__main__':
          mutationtype=args.mutationtype,
          nb_random=int(args.nb_rdm),
          extend_to=int(args.extend_to), 
-         rdm_pos=rdm_pos)
+         rdm_pos=rdm_pos,
+         excluded_domains=args.excluded_domains, 
+         included_into=args.included_into)
     
     logging.basicConfig(filename=f"{args.path}_command.log", level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')
