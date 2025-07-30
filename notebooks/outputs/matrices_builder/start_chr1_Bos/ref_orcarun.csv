@@ -1,8 +1,0 @@
-name	list_resol	path	gtype	genome	obj_type	refgenome	mtype
-orcarun_ref	"5     1Mb
-4     2Mb
-3     4Mb
-2     8Mb
-1    16Mb
-0    32Mb
-Name: resol, dtype: object"	./outputs/predictions/Bos_taurus_chr1/ref_orcarun	wt	sequence.fa	MatrixView	Bos_taurus_chr1	OrcaMatrix
