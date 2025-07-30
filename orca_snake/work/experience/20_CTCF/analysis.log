@@ -1,2 +1,0 @@
-# The following function as successfully been executed:
-analysis_slide(prediction_log_path=experience/20_CTCF/prediction.log, analysis_path=experience/20_CTCF/analysis, l_score_types=['insulation_count', 'PC1'], merged_by=rdm, l_resol=['1Mb', '2Mb', '4Mb', '8Mb', '16Mb', '32Mb'],show_rdm=False)
