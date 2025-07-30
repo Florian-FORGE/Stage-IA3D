@@ -1,0 +1,29 @@
+expe	mutations	expe_description	names
+LINE	/work/user/fforge/work/resources/annotations/LINE_over_3500pb_GRCh38_repeats.sorted.merged.bed	Long Interspersed Nuclear Elements (LINE) - size over 3.5kb -	LINE
+SINE	/work/user/fforge/work/resources/annotations/SINE_over_300pb_GRCh38_repeats.sorted.merged.bed	Small Interspersed Nuclear Elements (SINE) - size over 300pb -	SINE
+H3K4me3_ENCAN356JCU	/work/user/fforge/work/resources/annotations/H3K4me3_ENCAN356JCU.sorted.bed	H3K4me3 (Fixation site for promotors)	H3K4me3
+H3K4me1_ENCAN895IMP	/work/user/fforge/work/resources/annotations/H3K4me1_ENCAN895IMP.sorted.bed	H3K4me1 (Fixation site for active and primed enhancers)	H3K4me1
+H3K27ac_ENCAN891UCN	/work/user/fforge/work/resources/annotations/H3K27ac_ENCAN891UCN.sorted.bed	H3K27ac (Active enhancer mark)	H3K27ac
+tss_refseq	/work/user/fforge/work/resources/annotations/tss_refseq.sorted.extended.merged.bed	Transcription Start Sites -refseq-	Transription_start_site_reference
+tts_extracted	/work/user/fforge/work/resources/annotations/tts_extracted.sorted.extended.merged.bed	Transcription Terminal Sites	Transription_terminal_site_patterns
+tss_extracted	/work/user/fforge/work/resources/annotations/tss_extracted.sorted.extended.merged.bed	Transcription Start Sites	Transription_start_site_patterns
+excluded_refseq_tss	/work/user/fforge/work/resources/annotations/excluded_refseq_tss.sorted.extended.merged.bed	Selected Transcription Start Sites -not given by refseq-	Transription_start_site_not_in_reference
+refseq_exclusive_tss	/work/user/fforge/work/resources/annotations/refseq_exclusive_tss.sorted.extended.merged.bed	Selected Transcription Start Sites -only given by refseq-	Transription_start_site_only_in_reference
+phast_cons_highest_scores	/work/user/fforge/work/resources/annotations/hg38.phastCons20way.chr9.100bp.filtered_highest_1_percent_score.bed	Conserved portions of 100pb -1% most conserved-	Most_conserved
+phast_cons_10_lowest_scores	/work/user/fforge/work/resources/annotations/hg38.phastCons20way.chr9.100bp.filtered_lowest_10_percent_score.bed	Conserved portions of 100pb -10% less conserved-	More_less_conserved
+phast_cons_1_lowest_scores	/work/user/fforge/work/resources/annotations/hg38.phastCons20way.chr9.100bp.filtered_lowest_1_percent_score.bed	Conserved portions of 100pb -1% less conserved-	Less_conserved
+refseq_cds	/work/user/fforge/work/resources/annotations/GRCh38_refseq_cds_chr9_sorted_merged.bed	Coding sequences	Coding_sequences
+cds_free_phast_cons_highest_scores	/work/user/fforge/work/resources/annotations/cds_free_phast_cons_highest_scores.100pb.bed	Conserved portions of 100pb -1% most conserved with CDS removed-	Most_conserved_without_conding_sequence
+smaller_phast_cons_highest_scores	/work/user/fforge/work/resources/annotations/hg38.phastCons20way.chr9.50bp.filtered_highest_1_percent_score.bed	Conserved portions of 50pb -1% most conserved-	Smaller_most_conserved
+smaller_phast_cons_1_lowest_scores	/work/user/fforge/work/resources/annotations/hg38.phastCons20way.chr9.50bp.filtered_lowest_1_percent_score.bed	Conserved portions of 50pb -1% less conserved-	Smaller_less_conserved
+cds_free_smaller_phast_cons_highest_scores	/work/user/fforge/work/resources/annotations/cds_free_phast_cons_highest_scores.50pb.bed	Conserved portions of 50pb -1% most conserved with CDS removed-	Smaller_most_conserved_without_conding_sequence
+H3K9me3_ENCAN577WMG_q_val_over_5	/work/user/fforge/work/resources/annotations/H3K9me3_ENCAN577WMG.sorted.filtered_q_val_over_5.bed	H3K9me3 (Role in constitutive heterochomatin formation) -q-value < 10-5-	H3K9me3_\$q-value \leq 10^{-5}\$
+H3K9me3_ENCAN577WMG_q_val_over_7	/work/user/fforge/work/resources/annotations/H3K9me3_ENCAN577WMG.sorted.filtered_q_val_over_7.bed	H3K9me3 (Role in constitutive heterochomatin formation) -q-value < 10-7-	H3K9me3_\$q-value \leq 10^{-7}\$
+H3K9me3_ENCAN577WMG_q_val_over_10	/work/user/fforge/work/resources/annotations/H3K9me3_ENCAN577WMG.sorted.filtered_q_val_over_10.bed	H3K9me3 (Role in constitutive heterochomatin formation) -q-value < 10-10-	H3K9me3_\$q-value \leq 10^{-10}\$
+CTCF	/work/user/fforge/work/resources/annotations/GRCh38_CTCF_chr9_sorted_merged.bed	CTCF binding sites (multifuntional protein in genome regulation and gene expression)	CTCF
+H3K27me3_ENCAN368BEA	/work/user/fforge/work/resources/annotations/H3K27me3_ENCAN368BEA.sorted.bed	H3K27me3 (associated with gene repression for cell type-specific genes)	H3K27me3
+H3K27me3_ENCAN368BEA_q_val_over_10	/work/user/fforge/work/resources/annotations/H3K27me3_ENCAN368BEA.sorted.filtered_q_val_over_10.bed	H3K27me3 (associated with gene repression for cell type-specific genes) -q-value < 10-10-	H3K27me3_\$q-value \leq 10^{-1}\$
+H3K27me3_ENCAN368BEA_q_val_over_25	/work/user/fforge/work/resources/annotations/H3K27me3_ENCAN368BEA.sorted.filtered_q_val_over_25.bed	H3K27me3 (associated with gene repression for cell type-specific genes) -q-value < 10-25-	H3K27me3_\$q-value \leq 10^{-2.5}\$
+H3K27me3_ENCAN368BEA_q_val_over_50	/work/user/fforge/work/resources/annotations/H3K27me3_ENCAN368BEA.sorted.filtered_q_val_over_50.bed	H3K27me3 (associated with gene repression for cell type-specific genes) -q-value < 10-50-	H3K27me3_\$q-value \leq 10^{-5}\$
+H3K27me3_ENCAN368BEA_q_val_over_75	/work/user/fforge/work/resources/annotations/H3K27me3_ENCAN368BEA.sorted.filtered_q_val_over_75.bed	H3K27me3 (associated with gene repression for cell type-specific genes) -q-value < 10-75-	H3K27me3_\$q-value \leq 10^{-7.5}\$
+H3K27me3_ENCAN368BEA_q_val_over_100	/work/user/fforge/work/resources/annotations/H3K27me3_ENCAN368BEA.sorted.filtered_q_val_over_100.bed	H3K27me3 (associated with gene repression for cell type-specific genes) -q-value < 10-100-	H3K27me3_\$q-value \leq 10^{-10}\$
