@@ -1,0 +1,87 @@
+EXTREMUM_HEATMAP:
+  Matrix: [-0.2, 3]
+  RealMatrix: [-0.95, 1.8]
+  OrcaMatrix: [-0.75, 1.5]
+  Substract_mats : [-1.25, 0.75]
+
+COLOR_CHART:
+  insulation_count: blue
+  PC1: green
+  insulation_correl: red
+  IF: "#3B0B47"
+
+# TF Dificile à comprendre....
+WHICH_MATRIX:
+  Matrix:
+    heatmap: _obs_o_exp
+    count: _obs
+    correl: _obs
+    PC1: _obs
+    aif: _obs
+  OrcaMatrix:
+    heatmap: log_obs_o_exp
+    count: log_obs
+    correl: log_obs
+    PC1: log_obs
+    aif: obs
+  RealMatrix:
+    heatmap: log_obs_o_exp
+    count: log_obs
+    correl: log_obs
+    PC1: log_obs
+    aif: obs
+
+REF_GENOME: ../notebooks/resources/genome/Homo_sapiens.GRCh38.dna.primary_assembly/sequence.fa
+
+BASE_PATH_GENOME: ../notebooks/resources/genome
+
+# TF not recommended to put function names in a configuration file
+SMOOTH_MATRIX:
+  get_insulation_score:
+    bool: false
+    val:
+      RealMatrix: 5
+      OrcaMatrix: 2
+  mat_regression:
+    bool: false
+    val:
+      RealMatrix: 2
+      OrcaMatrix: 1
+
+TLVs_HEATMAP:
+  Matrix: [0.2, 0.5]
+  RealMatrix: [0.4, 0.6]
+  OrcaMatrix: [0.2, 0.5]
+
+SCATTER_PARAMETERS:
+  mat_regression:
+    alpha:
+      wtd: 0.75
+      rdm: 0.0625
+    color:
+      wtd: black
+      rdm: "#666666"
+  scores_regression:
+    alpha:
+      wtd: 0.75
+      rdm: 0.125
+    color:
+      insulation_count:
+        wtd: blue
+        rdm: "#9933FF"
+      PC1:
+        wtd: green
+        rdm: "#33FF99"
+      insulation_correl:
+        wtd: red
+        rdm: "#FF9933"
+
+DISPERSION_COLOR:
+  insulation_count: "ch:s=2.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
+  PC1: "ch:s=1.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
+  insulation_correl: "ch:s=.75, rot=.1, dark=.7, light=.3, hue=.5, gamma=.9"
+  default: "ch:s=0, rot=3, dark=.6, light=.4, hue=2, gamma=1.75"
+
+AIF_PARAMS:
+  fdr_threshold: .05
+  nb_passes: 1

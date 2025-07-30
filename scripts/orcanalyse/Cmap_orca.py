@@ -6,7 +6,8 @@ from matplotlib.colors import colorConverter
 
 
 """
-Script that creates a cmap used in the Orca module (thus this a copy of said script) 
+Script that creates a cmap used in the Orca module (thus this a copy of said script), plus 
+a new cmap created for substracted matrices (resulting from the substraction of two matrices).
 """
 ylorrd_cmap = copy.copy(matplotlib.cm.get_cmap("YlOrRd"))
 ylorrd_cmap.set_bad(color="#AAAAAA")
@@ -14,7 +15,7 @@ ylorrd_cmap.set_bad(color="#AAAAAA")
 newcmap2 = mpl.colors.LinearSegmentedColormap.from_list(
     "newcmap2",
     [
-        colorConverter.to_rgba(c)
+        (c)
         for c in ["#fff1d7", "#ffda9d", "#ffb362", "#ff8241", "#ff2b29", "#d60026", "#880028",]
     ],
     256,
@@ -77,3 +78,37 @@ hnh_cmap_ext5 = mpl.colors.LinearSegmentedColormap.from_list(
 hnh_cmap_ext5.set_bad(color="#AAAAAA")
 
 
+# This part is new
+
+# Step 1: Define base colormaps for different blue transitions
+blue_cmap_light = mpl.colors.LinearSegmentedColormap.from_list(
+    "blue_cmap_light",
+    ["#eaffea", "#b2ffb2", "#1dd3b6"], 128
+)
+blue_cmap_mid_light = mpl.colors.LinearSegmentedColormap.from_list(
+    "blue_cmap_mid",
+    ["#1dd3b6", "#19bfcf", "#40c9e2", "#00bcd4"],128
+)
+blue_cmap_mid_dark = mpl.colors.LinearSegmentedColormap.from_list(
+    "blue_cmap_mid_2",
+    ["#00bcd4", "#1790d2", "#1976d2"], 128
+)
+blue_cmap_dark = mpl.colors.LinearSegmentedColormap.from_list(
+    "blue_cmap_dark",
+    ["#1976d2", "#1565c0", "#104a8c", "#072447", "#001933"], 128
+)
+
+# Step 2: Sample each colormap
+light_colors = blue_cmap_light(np.linspace(0, 1, 128))
+mid_l_colors = blue_cmap_mid_light(np.linspace(0, 1, 128))
+mid_d_colors = blue_cmap_mid_dark(np.linspace(0, 1, 128))
+dark_colors = blue_cmap_dark(np.linspace(0, 1, 128))
+
+# Step 3: Stack the arrays for smooth transition
+blue_cmap_smooth_data = np.vstack([light_colors, mid_l_colors[1:], mid_d_colors[1:] ,dark_colors[1:]])
+
+# Step 4: Create the final smooth colormap
+blue_cmap = mpl.colors.LinearSegmentedColormap.from_list(
+    "blue_cmap", blue_cmap_smooth_data
+)
+blue_cmap.set_bad(color="#AAAAAA")

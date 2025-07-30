@@ -1,0 +1,6 @@
+expe	mutations
+tss_refseq	/work/user/fforge/work/resources/annotations/tss_refseq.sorted.extended.merged.bed
+tts_extracted	/work/user/fforge/work/resources/annotations/tts_extracted.sorted.extended.merged.bed
+tss_extracted	/work/user/fforge/work/resources/annotations/tss_extracted.sorted.extended.merged.bed
+excluded_refseq_tss	/work/user/fforge/work/resources/annotations/excluded_refseq_tss.sorted.extended.merged.bed
+refseq_exclusive_tss	/work/user/fforge/work/resources/annotations/refseq_exclusive_tss.sorted.extended.merged.bed
